@@ -1,0 +1,14 @@
+# Ignore arquivos de memória e outros arquivos desnecessários
+*.log
+*.tmp
+*.bak
+__pycache__/
+.env
+.DS_Store
+Thumbs.db
+.vscode/
+node_modules/
+.mypy_cache/
+.idea/
+*.swp
+*.swo
