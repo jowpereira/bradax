@@ -103,7 +103,7 @@ class Usage(BaseModel):
 
 class LLMRequest(BaseRequest):
     model: str = Field(..., description="Nome do modelo LLM")
-    messages: List[Message] = Field(..., min_items=1)
+    messages: List[Message] = Field(..., min_length=1)
     parameters: Optional[LLMParameters] = None
 
 
@@ -128,14 +128,11 @@ class VectorQueryRequest(BaseRequest):
     threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
     filters: Optional[Dict[str, Any]] = None
 
-    def model_validate(cls, values):
-        query_vector = values.get('query_vector')
-        query_text = values.get('query_text')
-        
-        if not query_vector and not query_text:
+    def model_post_init(self, __context):
+        """Validação customizada pós-inicialização"""
+        if not self.query_vector and not self.query_text:
             raise ValueError('Either query_vector or query_text must be provided')
-        
-        return values
+        return self
 
 
 class VectorResult(BaseModel):
@@ -158,7 +155,7 @@ class VectorDocument(BaseModel):
 
 class VectorUpsertRequest(BaseRequest):
     collection: str = Field(..., description="Nome da coleção")
-    documents: List[VectorDocument] = Field(..., min_items=1)
+    documents: List[VectorDocument] = Field(..., min_length=1)
 
 
 class VectorUpsertResponse(BaseResponse):
@@ -170,7 +167,7 @@ class VectorUpsertResponse(BaseResponse):
 class GraphDeployRequest(BaseRequest):
     name: str = Field(..., description="Nome do grafo")
     definition: str = Field(..., description="Definição YAML/JSON do grafo")
-    format: str = Field(default="yaml", regex="^(yaml|json)$")
+    format: str = Field(default="yaml", pattern="^(yaml|json)$")
 
 
 class GraphDeployResponse(BaseResponse):
