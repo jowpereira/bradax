@@ -12,3 +12,67 @@ node_modules/
 .idea/
 *.swp
 *.swo
+
+# Pastas de memória (não versionadas)
+docs/memory/
+workspace-plans/
+workspace-debug/
+
+# Ambiente virtual Python
+.venv/
+venv/
+env/
+
+# Arquivos de build e distribuição
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Arquivos de teste e cobertura
+.coverage
+htmlcov/
+.pytest_cache/
+test-results.xml
+coverage.xml
+
+# Dados locais
+data/
+*.db
+*.sqlite3
+
+# Chaves e certificados
+*.pem
+*.key
+*.crt
+
+# Logs e PID files
+*.pid
+logs/
+
+# Docker volumes
+postgres_data/
+redis_data/
+prometheus_data/
+grafana_data/
+
+# Generated gRPC files
+*_pb2.py
+*_pb2_grpc.py
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor configs
+.vscode/settings.json
+.idea/workspace.xml
