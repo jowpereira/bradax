@@ -162,6 +162,32 @@ def create_project_config(
     )
 
 
+# ---------------------------------------------------------------------------
+# Helpers de configuração global
+# ---------------------------------------------------------------------------
+_GLOBAL_SDK_CONFIG: BradaxSDKConfig | None = None
+
+
+def get_sdk_config() -> BradaxSDKConfig:
+    """Retorna instância global de configuração do SDK."""
+    global _GLOBAL_SDK_CONFIG
+    if _GLOBAL_SDK_CONFIG is None:
+        _GLOBAL_SDK_CONFIG = BradaxSDKConfig()
+    return _GLOBAL_SDK_CONFIG
+
+
+def set_sdk_config(config: BradaxSDKConfig) -> None:
+    """Define configuração global do SDK."""
+    global _GLOBAL_SDK_CONFIG
+    _GLOBAL_SDK_CONFIG = config
+
+
+def reset_sdk_config() -> None:
+    """Reseta configuração global do SDK."""
+    global _GLOBAL_SDK_CONFIG
+    _GLOBAL_SDK_CONFIG = None
+
+
 def get_global_config() -> Dict[str, Any]:
     """
     Retorna configuração global consolidada.
