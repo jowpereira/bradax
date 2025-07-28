@@ -64,7 +64,6 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         Returns:
             Response HTTP ou erro 429
         """
-        """
         
         # Obter IP do cliente
         client_ip = self._get_client_ip(request)

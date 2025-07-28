@@ -87,9 +87,9 @@ def create_app() -> FastAPI:
         title="bradax Broker",
         description="Runtime de IA generativa seguro e flexível para bradax AI Solutions",
         version="0.1.0",
-        docs_url="/docs" if settings.BRADAX_BROKER_DEBUG else None,
-        redoc_url="/redoc" if settings.BRADAX_BROKER_DEBUG else None,
-        openapi_url="/openapi.json" if settings.BRADAX_BROKER_DEBUG else None,
+        docs_url="/docs" if settings.debug else None,
+        redoc_url="/redoc" if settings.debug else None,
+        openapi_url="/openapi.json" if settings.debug else None,
         lifespan=lifespan
     )
     
@@ -109,10 +109,10 @@ def setup_middlewares(app: FastAPI):
     """Configura middlewares da aplicação"""
     
     # CORS - apenas para desenvolvimento local
-    if settings.BRADAX_BROKER_DEBUG:
+    if settings.debug:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=settings.BRADAX_BROKER_CORS_ORIGINS,
+            allow_origins=settings.cors_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE"],
             allow_headers=["*"],
@@ -121,7 +121,7 @@ def setup_middlewares(app: FastAPI):
     # Trusted hosts
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=settings.BRADAX_BROKER_ALLOWED_HOSTS
+        allowed_hosts=[settings.host]
     )
     
     # Middlewares customizados
@@ -236,11 +236,11 @@ def main():
     """Ponto de entrada principal"""
     uvicorn.run(
         "broker.main:app",
-        host=settings.BRADAX_BROKER_HOST,
-        port=settings.BRADAX_BROKER_PORT,
-        reload=settings.BRADAX_BROKER_DEBUG,
-        log_level="debug" if settings.BRADAX_BROKER_DEBUG else "info",
-        access_log=settings.BRADAX_BROKER_DEBUG,
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
+        log_level="debug" if settings.debug else "info",
+        access_log=settings.debug,
         loop="asyncio"
     )
 
