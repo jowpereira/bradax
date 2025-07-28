@@ -115,3 +115,12 @@ class AuditLogger:
     def get_logs(self) -> List[Dict[str, Any]]:
         """Retorna logs de auditoria."""
         return self.logs.copy()
+
+
+# Alias de compatibilidade
+CorporateBradaxClient = BradaxCorporateClient
+
+
+def create_client(*args, **kwargs) -> BradaxCorporateClient:
+    """Factory simples para criar um cliente corporativo."""
+    return BradaxCorporateClient(*args, **kwargs)
