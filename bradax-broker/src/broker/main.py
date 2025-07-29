@@ -5,6 +5,7 @@ Este módulo implementa o servidor FastAPI que atua como proxy
 seguro para operações de LLM, Vector DB e Graph execution.
 """
 
+import datetime
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -18,7 +19,7 @@ from fastapi.responses import JSONResponse
 import structlog
 
 from .config import settings
-from .api.routes import health, auth, llm, vector, graph, metrics
+from .api.routes import health, auth, llm, metrics, projects, system
 from .middleware.logging import LoggingMiddleware
 from .middleware.security import SecurityMiddleware
 from .middleware.rate_limiting import RateLimitingMiddleware
@@ -118,10 +119,16 @@ def setup_middlewares(app: FastAPI):
             allow_headers=["*"],
         )
     
-    # Trusted hosts
+    # Trusted hosts (incluir testserver para testes)
+    allowed_hosts = [settings.host]
+    if settings.debug:  # Adicionar testserver em modo debug
+        allowed_hosts.append("testserver")
+        allowed_hosts.append("localhost")
+        allowed_hosts.append("127.0.0.1")
+    
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=[settings.host]
+        allowed_hosts=allowed_hosts
     )
     
     # Middlewares customizados
@@ -151,22 +158,24 @@ def setup_routes(app: FastAPI):
         tags=["LLM Operations"]
     )
     
+    # NOVA ROTA: Gerenciamento de Projetos com Telemetria
     app.include_router(
-        vector.router, 
-        prefix=f"{api_v1_prefix}/vectors", 
-        tags=["Vector Database"]
-    )
-    
-    app.include_router(
-        graph.router, 
-        prefix=f"{api_v1_prefix}/graphs", 
-        tags=["Graph Management"]
+        projects.router,
+        prefix=f"{api_v1_prefix}/management",
+        tags=["Project Management", "Telemetria", "Guardrails"]
     )
     
     app.include_router(
         metrics.router, 
         prefix=f"{api_v1_prefix}/metrics", 
         tags=["Observability"]
+    )
+    
+    # NOVA ROTA: Operações de Sistema e Telemetria
+    app.include_router(
+        system.router,
+        prefix=f"{api_v1_prefix}/system", 
+        tags=["System Operations", "Telemetria", "Health"]
     )
 
 
@@ -183,7 +192,7 @@ def setup_error_handlers(app: FastAPI):
                 "message": exc.detail,
                 "status_code": exc.status_code,
                 "request_id": getattr(request.state, "request_id", None),
-                "timestamp": structlog.processors.TimeStamper().format_timestamp(None)
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
             }
         )
     
@@ -202,7 +211,7 @@ def setup_error_handlers(app: FastAPI):
                 "error": "validation_error",
                 "message": str(exc),
                 "request_id": getattr(request.state, "request_id", None),
-                "timestamp": structlog.processors.TimeStamper().format_timestamp(None)
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
             }
         )
     
@@ -223,7 +232,7 @@ def setup_error_handlers(app: FastAPI):
                 "error": "internal_server_error",
                 "message": "Erro interno do servidor",
                 "request_id": getattr(request.state, "request_id", None),
-                "timestamp": structlog.processors.TimeStamper().format_timestamp(None)
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
             }
         )
 

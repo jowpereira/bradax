@@ -4,10 +4,18 @@ Exceções customizadas do bradax SDK
 Hierarquia profissional de exceções para diferentes cenários de erro.
 """
 
+import os
+import sys
 from typing import Optional, Dict, Any
 
-# Usar constants internas do SDK
-from ..constants import SDKValidationConstants
+# Adicionar o path para bradax-constants se não estiver instalado
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'bradax-constants', 'src'))
+
+try:
+    from bradax_constants import ValidationConstants
+    ERROR_MESSAGE_MAX_LENGTH = ValidationConstants.ERROR_MESSAGE_MAX_LENGTH
+except ImportError:
+    ERROR_MESSAGE_MAX_LENGTH = 200
 
 
 class BradaxException(Exception):
@@ -35,9 +43,8 @@ class BradaxException(Exception):
             cause: Exceção original que causou este erro
         """
         # Truncar mensagem se muito longa
-        max_length = SDKValidationConstants.MAX_RESPONSE_LENGTH
-        if len(message) > max_length:
-            message = message[:max_length] + "..."
+        if len(message) > ERROR_MESSAGE_MAX_LENGTH:
+            message = message[:ERROR_MESSAGE_MAX_LENGTH] + "..."
             
         super().__init__(message)
         self.error_code = error_code or "BRADAX_GENERIC_ERROR"
@@ -53,6 +60,10 @@ class BradaxException(Exception):
             "context": self.context,
             "cause": str(self.cause) if self.cause else None
         }
+
+
+# Alias para compatibilidade  
+BradaxError = BradaxException
 
 
 class BradaxAuthenticationError(BradaxException):
@@ -235,7 +246,7 @@ def create_exception_from_http_status(
     
     context = {
         'http_status_code': status_code,
-        'response_body': response_body[:SDKValidationConstants.MAX_RESPONSE_LENGTH] if response_body else None
+        'response_body': response_body[:ERROR_MESSAGE_MAX_LENGTH] if response_body else None
     }
     
     if url:
@@ -247,21 +258,6 @@ def create_exception_from_http_status(
     )
 
 
-# Aliases para compatibilidade com código legado
-BradaxError = BradaxException  # Alias principal
-BradaxAPIError = BradaxException  # Alias adicional
-
-
-# Exportações públicas
-__all__ = [
-    'BradaxException',
-    'BradaxError',  # Alias
-    'BradaxAPIError',  # Alias  
-    'BradaxAuthenticationError',
-    'BradaxValidationError',
-    'BradaxNetworkError',
-    'BradaxConfigurationError',
-    'BradaxRateLimitError',
-    'BradaxComplianceError',
-    'create_from_http_error'
-]
+# Aliases para compatibilidade com imports antigos
+BradaxConnectionError = BradaxNetworkError
+BradaxBrokerError = BradaxNetworkError

@@ -1,27 +1,20 @@
 """
-Rate Limiting Middleware
+Rate Limiting Middleware Otimizado
 
-Middleware para controle de taxa de requisições usando constantes centralizadas.
+Middleware para controle de taxa de requisições com constantes internas.
 """
 
 import time
-import os
-import sys
 from typing import Dict, Callable
 from fastapi import Request, Response, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# Adicionar o path para bradax-constants se não estiver instalado
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'bradax-constants', 'src'))
 
-try:
-    from bradax_constants import SecurityConstants
-except ImportError:
-    # Fallback para desenvolvimento
-    class SecurityConstants:
-        DEFAULT_REQUESTS_PER_MINUTE = 60
-        RATE_LIMIT_WINDOW_SECONDS = 60
-        RATE_LIMIT_CLEANUP_INTERVAL = 300
+class SecurityConstants:
+    """Constantes de segurança centralizadas"""
+    DEFAULT_REQUESTS_PER_MINUTE = 60
+    RATE_LIMIT_WINDOW_SECONDS = 60
+    RATE_LIMIT_CLEANUP_INTERVAL = 300
 
 
 class RateLimitingMiddleware(BaseHTTPMiddleware):
@@ -47,10 +40,8 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.requests_per_minute = requests_per_minute or SecurityConstants.DEFAULT_REQUESTS_PER_MINUTE
-        super().__init__(app)
-        self.requests_per_minute = requests_per_minute or SecurityConstants.DEFAULT_REQUESTS_PER_MINUTE
         self.burst_size = burst_size
-        self.client_data: Dict[str, Dict] = {}
+        self.clients: Dict[str, Dict] = {}
         self.last_cleanup = time.time()
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
@@ -68,19 +59,13 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         # Obter IP do cliente
         client_ip = self._get_client_ip(request)
         
-        # Em desenvolvimento, desabilitar rate limiting para testes
-        from broker.config import is_development
-        if is_development():
-            # Permitir todas as requisições em desenvolvimento
-            pass
-        else:
-            # Verificar rate limit apenas em produção
-            if not self._check_rate_limit(client_ip):
-                raise HTTPException(
-                    status_code=429,
-                    detail="Rate limit exceeded. Too many requests.",
-                    headers={"Retry-After": str(SecurityConstants.RATE_LIMIT_WINDOW_SECONDS)}
-                )
+        # Verificar rate limit (sempre ativo para produção)
+        if not self._check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Too many requests.",
+                headers={"Retry-After": str(SecurityConstants.RATE_LIMIT_WINDOW_SECONDS)}
+            )
         
         # Processar requisição
         response = await call_next(request)

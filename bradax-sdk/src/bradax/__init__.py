@@ -1,95 +1,34 @@
 """
-bradax SDK - Cliente Python Corporativo Modular
+bradax SDK - Cliente governado para LLM
 
-SDK Python profissional com arquitetura modular para comunicação 
-segura com o bradax Broker. Elimina hard-code e implementa 
-separação clara de responsabilidades.
-
-Arquitetura Modular:
-- auth/: Módulo de autenticação e autorização
-- http/: Módulo de comunicação HTTP
-- validation/: Módulo de validação e compliance
-- exceptions/: Módulo de exceções customizadas
-- client/: Módulo principal do cliente
-- config/: Módulo de configuração
-
-Uso corporativo recomendado:
-    from bradax import CorporateBradaxClient, create_client
-    
-    # Cliente corporativo
-    client = CorporateBradaxClient(
-        project_token="proj_ti_ai_chatbot_2025_a1b2c3d4",
-        broker_url="https://api.bradax.com"
-    )
-    
-    # Ou via factory
-    client = create_client(
-        project_token="proj_ti_ai_chatbot_2025_a1b2c3d4",
-        environment="production"
-    )
+Interface simples para devs usarem modelos através do hub com
+telemetria e guardrails obrigatórios (não desabilitáveis).
 """
 
-import os
-import sys
+# Cliente principal
+from .client import BradaxClient
 
-# Adicionar o path para bradax-constants se não estiver instalado
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'bradax-constants', 'src'))
-
-try:
-    from bradax_constants import OrganizationConstants
-    PACKAGE_AUTHOR = OrganizationConstants.PACKAGE_AUTHOR
-except ImportError:
-    PACKAGE_AUTHOR = "Bradax Development Team"
-
-# Imports principais da arquitetura modular
-from .client.corporate_client import (
-    CorporateBradaxClient,
-    create_client
-)
-
-from .auth.project_auth import (
-    ProjectAuth,
-    ProjectConfig
-)
-
-from .validation.audit_logger import AuditLogger
-from .validation.compliance_validator import ComplianceValidator
-
+# Classes de exceção 
 from .exceptions.bradax_exceptions import (
-    BradaxException,
+    BradaxError,
     BradaxAuthenticationError,
+    BradaxConnectionError,
+    BradaxConfigurationError,
     BradaxValidationError,
-    BradaxNetworkError
+    BradaxBrokerError
 )
 
-# Compatibilidade com código legado (DEPRECATED)
-from .client.corporate_client import BradaxClient
+# Informações do pacote
+__version__ = "1.0.0-governado"
+__author__ = "Bradax Development Team"
 
-# Client padrão recomendado
-BradaxCorporateClient = CorporateBradaxClient
-
-__version__ = "1.0.0-modular"
-__author__ = PACKAGE_AUTHOR
+# Exportar apenas o necessário
 __all__ = [
-    # Cliente principal
-    "CorporateBradaxClient",
-    "BradaxCorporateClient", 
-    "create_client",
-    
-    # Módulos de autenticação
-    "ProjectAuth",
-    "ProjectConfig",
-    
-    # Módulos de validação
-    "AuditLogger",
-    "ComplianceValidator",
-    
-    # Módulos de exceções
-    "BradaxException",
-    "BradaxAuthenticationError",
+    "BradaxClient",
+    "BradaxError",
+    "BradaxAuthenticationError", 
+    "BradaxConnectionError",
+    "BradaxConfigurationError",
     "BradaxValidationError",
-    "BradaxNetworkError",
-    
-    # Compatibilidade legada
-    "BradaxClient"  # DEPRECATED
+    "BradaxBrokerError"
 ]

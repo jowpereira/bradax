@@ -37,7 +37,7 @@ except ImportError:
     class OrganizationConstants:
         ORGANIZATION_NAME = "Bradax AI Solutions"
 
-from broker.auth.project_auth import project_auth
+from ...auth.project_auth import project_auth
 
 router = APIRouter()
 security = HTTPBearer()

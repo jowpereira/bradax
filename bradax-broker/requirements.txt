@@ -38,6 +38,12 @@ pinecone-client==2.2.4
 weaviate-client==3.25.3
 chromadb==0.4.18
 
+# LangChain (versões mais recentes)
+langchain==0.1.7
+langchain-openai==0.0.8
+langchain-community==0.0.20
+langchain-core==0.1.20  # Core components para reutilização e componentes genéricos
+
 # Utilities
 python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
