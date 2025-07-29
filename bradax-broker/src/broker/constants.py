@@ -79,25 +79,23 @@ class HubLLMConstants:
     
     # Modelos suportados pelo Hub
     SUPPORTED_MODELS = [
+        'gpt-4.1-nano',
+        'gpt-4.1-mini',
+        'gpt-4.1',
         'gpt-4o-mini',
-        'gpt-4o', 
-        'gpt-4-turbo',
-        'claude-3-haiku',
-        'claude-3-sonnet',
-        'claude-3-opus'
+        'gpt-4o'
     ]
     
     # Limites por modelo
     MODEL_LIMITS = {
-        'gpt-4o-mini': {'max_tokens': 16384, 'cost_per_1k': 0.15},
-        'gpt-4o': {'max_tokens': 8192, 'cost_per_1k': 5.0},
-        'gpt-4-turbo': {'max_tokens': 4096, 'cost_per_1k': 30.0},
-        'claude-3-haiku': {'max_tokens': 8192, 'cost_per_1k': 0.25},
-        'claude-3-sonnet': {'max_tokens': 8192, 'cost_per_1k': 3.0},
-        'claude-3-opus': {'max_tokens': 4096, 'cost_per_1k': 15.0}
+        'gpt-4.1-nano': {'max_tokens': 128000, 'cost_per_1k': 0.000025},
+        'gpt-4.1-mini': {'max_tokens': 128000, 'cost_per_1k': 0.000150},
+        'gpt-4.1': {'max_tokens': 128000, 'cost_per_1k': 0.003},
+        'gpt-4o-mini': {'max_tokens': 128000, 'cost_per_1k': 0.000150},
+        'gpt-4o': {'max_tokens': 128000, 'cost_per_1k': 0.005}
     }
     
-    DEFAULT_MODEL = 'gpt-4o-mini'
+    DEFAULT_MODEL = 'gpt-4.1-nano'
     DEFAULT_MAX_TOKENS = 8192
     DEFAULT_TEMPERATURE = 0.7
 
@@ -160,3 +158,25 @@ def get_model_limits(model: str) -> Dict[str, Any]:
         'max_tokens': HubLLMConstants.DEFAULT_MAX_TOKENS,
         'cost_per_1k': 0.0
     })
+
+
+class HubStorageConstants:
+    """Constantes para armazenamento de dados do Hub"""
+    
+    # Diretórios
+    DATA_DIR = "data"
+    
+    # Arquivos de dados
+    PROJECTS_FILE = "projects.json"
+    TELEMETRY_FILE = "telemetry.json"
+    GUARDRAILS_FILE = "guardrails.json"
+    SYSTEM_INFO_FILE = "system_info.json"
+
+
+def get_hub_environment() -> BradaxEnvironment:
+    """Retorna ambiente atual do Hub"""
+    env = os.getenv('BRADAX_ENVIRONMENT', 'development')
+    try:
+        return BradaxEnvironment(env)
+    except ValueError:
+        return BradaxEnvironment.DEVELOPMENT
