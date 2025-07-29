@@ -2,22 +2,22 @@
 
 from .bradax_exceptions import (
     BradaxException,
-    BradaxError,  # Alias principal  
     BradaxAuthenticationError,
     BradaxValidationError,
     BradaxNetworkError,
     BradaxConfigurationError,
     BradaxRateLimitError,
-    BradaxComplianceError
+    BradaxComplianceError,
+    create_exception_from_http_status
 )
 
 __all__ = [
     "BradaxException",
-    "BradaxError",  # Alias
     "BradaxAuthenticationError", 
     "BradaxValidationError",
     "BradaxNetworkError",
     "BradaxConfigurationError",
     "BradaxRateLimitError",
-    "BradaxComplianceError"
+    "BradaxComplianceError",
+    "create_exception_from_http_status"
 ]

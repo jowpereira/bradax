@@ -61,15 +61,15 @@ class SDKModelConstants:
     
     # Modelos disponíveis
     AVAILABLE_MODELS = [
+        'gpt-4.1-nano',
+        'gpt-4.1-mini',
+        'gpt-4.1',
         'gpt-4o-mini',
-        'gpt-4o',
-        'gpt-4-turbo',
-        'claude-3-haiku',
-        'claude-3-sonnet'
+        'gpt-4o'
     ]
     
-    DEFAULT_MODEL = 'gpt-4o-mini'
-    DEFAULT_MAX_TOKENS = 8192
+    DEFAULT_MODEL = 'gpt-4.1-nano'
+    DEFAULT_MAX_TOKENS = 128000
     DEFAULT_TEMPERATURE = 0.7
 
 

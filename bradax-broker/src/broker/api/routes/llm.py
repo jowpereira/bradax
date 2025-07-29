@@ -1,194 +1,194 @@
 """
-LLM Operations endpoints
+Rotas da API LLM - Usando Controllers MVC
 
-Gerencia requisições para Large Language Models,
-incluindo autenticação corporativa e invocação segura.
+Endpoints para operações de LLM com controllers dedicados.
 """
 
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPBearer
-from pydantic import BaseModel
-import json
-import asyncio
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any, Optional
+from pydantic import BaseModel, Field
 
-from broker.services.openai_service import OpenAIService
-from broker.auth.project_auth import project_auth
-
-router = APIRouter()
-security = HTTPBearer()
+from ...controllers.llm_controller import llm_controller
 
 
-class LLMInvokeRequest(BaseModel):
-    model: str
-    messages: List[Dict[str, Any]]
-    parameters: Optional[Dict[str, Any]] = None
+# Criar router
+router = APIRouter(tags=["LLM"])
 
 
-class LLMStreamRequest(BaseModel):
-    model: str
-    messages: List[Dict[str, Any]]
-    parameters: Optional[Dict[str, Any]] = None
+# Modelos Pydantic para validação
+class GenerateRequest(BaseModel):
+    """Modelo para requisição de geração"""
+    model: str = Field(..., description="ID do modelo LLM")
+    prompt: str = Field(..., description="Prompt para o modelo")
+    system_prompt: Optional[str] = Field(None, description="Prompt de sistema")
+    max_tokens: Optional[int] = Field(1000, ge=1, le=32000, description="Máximo de tokens")
+    temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Temperatura")
+    stream: Optional[bool] = Field(False, description="Streaming de resposta")
+    project_id: Optional[str] = Field(None, description="ID do projeto")
 
 
-# Instância global do serviço OpenAI
-openai_service = None
+class InvokeRequest(BaseModel):
+    """Modelo para requisição de invoke"""
+    operation: str = Field(..., description="Tipo de operação (chat, completion, batch, stream)")
+    model: str = Field(..., description="ID do modelo LLM")
+    payload: Dict[str, Any] = Field(..., description="Payload completo da requisição")
+    project_id: Optional[str] = Field(None, description="ID do projeto")
+    request_id: Optional[str] = Field(None, description="ID da requisição")
 
 
-def get_openai_service() -> OpenAIService:
-    """Dependency para obter instância do OpenAI service"""
-    global openai_service
-    if openai_service is None:
-        try:
-            openai_service = OpenAIService()
-        except ValueError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"OpenAI não configurado: {str(e)}"
-            )
-    return openai_service
-
-
-async def validate_project_auth(token = Depends(security)) -> Dict[str, Any]:
-    """Valida autenticação do projeto e retorna payload"""
-    return await project_auth.validate_token(token.credentials)
-
-
-@router.post("/invoke", summary="Invocar LLM (síncrono)")
-async def invoke_llm(
-    request: LLMInvokeRequest,
-    service: OpenAIService = Depends(get_openai_service),
-    auth_payload: Dict[str, Any] = Depends(validate_project_auth)
-) -> Dict[str, Any]:
+@router.get("/models")
+async def get_available_models(project_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Invoca um LLM de forma síncrona com autenticação corporativa.
+    Lista modelos LLM disponíveis
     
     Args:
-        request: Dados da requisição (model, messages, parameters)
-        service: Serviço OpenAI
-        auth_payload: Dados de autenticação do projeto
+        project_id: ID do projeto para filtros específicos
         
     Returns:
-        Resposta do LLM com usage tracking e auditoria
+        Lista de modelos disponíveis
     """
-    
-    if not request.model or not request.messages:
-        raise HTTPException(
-            status_code=400,
-            detail="model e messages são obrigatórios"
-        )
-    
-    # Validar se modelo está permitido no projeto
-    allowed_models = auth_payload.get("allowed_models", [])
-    if request.model not in allowed_models:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Modelo {request.model} não permitido para este projeto. Modelos permitidos: {allowed_models}"
-        )
-    
     try:
-        # Adicionar informações de auditoria
-        audit_info = {
-            "project_id": auth_payload.get("project_id"),
-            "organization": auth_payload.get("organization"),
-            "model_requested": request.model
-        }
+        result = llm_controller.get_available_models(project_id=project_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
+
+
+@router.post("/invoke")
+@router.post("/invoke")
+async def invoke(request: InvokeRequest) -> Dict[str, Any]:
+    """
+    Invocação central para wrapper LangChain
+    
+    Ponto de entrada único para diferentes tipos de operações LLM.
+    Suporta: chat, completion, batch, stream, etc.
+    
+    Args:
+        request: Dados da requisição
         
-        # Usar serviço OpenAI real
-        result = await service.invoke_llm(request.model, request.messages, request.parameters)
-        
-        # Adicionar informações de auditoria ao resultado
-        result["audit"] = audit_info
-        
+    Returns:
+        Resultado da operação + metadados
+    """
+    try:
+        # Executar invoke via controller
+        result = await llm_controller.invoke(
+            operation=request.operation,
+            model_id=request.model,
+            payload=request.payload,
+            project_id=request.project_id,
+            request_id=request.request_id
+        )
         return result
         
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
 
 
-@router.post("/stream", summary="Invocar LLM (streaming)")
-async def stream_llm(
-    request: LLMStreamRequest,
-    service: OpenAIService = Depends(get_openai_service),
-    auth_payload: Dict[str, Any] = Depends(validate_project_auth)
-) -> StreamingResponse:
+@router.post("/generate")
+async def generate_response(request: GenerateRequest) -> Dict[str, Any]:
     """
-    Invoca um LLM com streaming de resposta e autenticação corporativa.
+    Gera resposta usando LLM
     
     Args:
-        request: Dados da requisição (model, messages, parameters)
-        service: Serviço OpenAI
-        auth_payload: Dados de autenticação do projeto
+        request: Dados da requisição LLM
         
     Returns:
-        Server-Sent Events com streaming da resposta
+        Resposta do modelo
     """
-    
-    if not request.model or not request.messages:
-        raise HTTPException(
-            status_code=400,
-            detail="model e messages são obrigatórios"
-        )
-    
-    # Validar se modelo está permitido no projeto
-    allowed_models = auth_payload.get("allowed_models", [])
-    if request.model not in allowed_models:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Modelo {request.model} não permitido para este projeto"
-        )
-
-    async def generate_stream():
-        try:
-            async for chunk in service.stream_llm(request.model, request.messages, request.parameters):
-                # Adicionar informações de auditoria no primeiro chunk
-                if chunk.get("choices") and len(chunk["choices"]) > 0:
-                    chunk["audit"] = {
-                        "project_id": auth_payload.get("project_id"),
-                        "organization": auth_payload.get("organization")
-                    }
-                yield f"data: {json.dumps(chunk)}\n\n"
-        except Exception as e:
-            error_chunk = {"error": str(e), "finished": True}
-            yield f"data: {json.dumps(error_chunk)}\n\n"
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/plain",
-        headers={"Cache-Control": "no-cache"}
-    )
+    try:
+        # Converter Pydantic model para dict
+        request_data = request.dict()
+        
+        # Executar geração via controller
+        result = await llm_controller.generate_response(request_data)
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
 
 
-@router.get("/models", summary="Listar modelos disponíveis")
-async def list_models(
-    service: OpenAIService = Depends(get_openai_service),
-    auth_payload: Dict[str, Any] = Depends(validate_project_auth)
-) -> Dict[str, Any]:
+@router.get("/status")
+async def get_service_status() -> Dict[str, Any]:
     """
-    Lista modelos LLM permitidos para o projeto autenticado.
+    Obtém status do serviço LLM
+    
+    Returns:
+        Status de providers e estatísticas
+    """
+    try:
+        result = llm_controller.get_service_status()
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
+
+
+@router.post("/reload")
+async def reload_service() -> Dict[str, Any]:
+    """
+    Recarrega configuração do serviço
+    
+    Returns:
+        Resultado do reload
+    """
+    try:
+        result = llm_controller.reload_service()
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")
+
+
+@router.get("/models/{model_id}/info")
+async def get_model_info(model_id: str) -> Dict[str, Any]:
+    """
+    Obtém informações detalhadas de um modelo específico
     
     Args:
-        service: Serviço OpenAI
-        auth_payload: Dados de autenticação do projeto
+        model_id: ID do modelo
         
     Returns:
-        Lista de modelos permitidos com capacidades
+        Informações do modelo
     """
-    
-    all_models = service.get_available_models()
-    allowed_models = auth_payload.get("allowed_models", [])
-    
-    # Filtrar apenas modelos permitidos para o projeto
-    filtered_models = {
-        model: details for model, details in all_models.items()
-        if model in allowed_models
-    }
-    
-    return {
-        "models": filtered_models,
-        "project_id": auth_payload.get("project_id"),
-        "total_allowed": len(filtered_models)
-    }
+    try:
+        # Via controller será implementado no próximo commit
+        # Por enquanto usando serviço diretamente
+        from ...services.llm.service import LLMService
+        
+        service = LLMService()
+        model_info = service.get_model_info(model_id)
+        
+        if not model_info:
+            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+        
+        model_data = {
+            "model_id": model_info.model_id,
+            "name": model_info.name,
+            "provider": model_info.provider.value,
+            "provider_model_name": model_info.provider_model_name,
+            "max_tokens": model_info.max_tokens,
+            "cost_per_1k_input": model_info.cost_per_1k_input,
+            "cost_per_1k_output": model_info.cost_per_1k_output,
+            "capabilities": [cap.value for cap in model_info.capabilities],
+            "enabled": model_info.enabled
+        }
+        
+        return {
+            "success": True,
+            "message": f"Model {model_id} information retrieved",
+            "data": model_data,
+            "error": None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor: {str(e)}")

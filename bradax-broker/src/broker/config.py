@@ -7,7 +7,7 @@ configuração flexível via environment variables.
 
 import os
 from typing import Dict, Any, List
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 
 # Usar constants internas do Hub
 from .constants import (
@@ -80,24 +80,29 @@ class Settings(BaseModel):
         if self.environment == BradaxEnvironment.DEVELOPMENT:
             self.debug = True
     
-    @validator('environment', pre=True)
+    @field_validator('environment', mode='before')
+    @classmethod
     def validate_environment(cls, v):
         if isinstance(v, str):
             return BradaxEnvironment(v.lower())
         return v
     
-    @validator('supported_models')
+    @field_validator('supported_models')
+    @classmethod
     def validate_models(cls, v):
         for model in v:
             if not validate_model(model):
                 raise ValueError(f"Modelo não suportado: {model}")
         return v
     
-    @validator('jwt_secret_key')
-    def validate_jwt_secret(cls, v, values):
-        env = values.get('environment', BradaxEnvironment.DEVELOPMENT)
-        if env == BradaxEnvironment.PRODUCTION and v == 'dev-secret-change-in-production':
-            raise ValueError("JWT secret deve ser alterado em produção")
+    @field_validator('jwt_secret_key')
+    @classmethod
+    def validate_jwt_secret(cls, v, info):
+        # Verifica o contexto de validação para obter environment
+        if hasattr(info, 'data') and info.data:
+            env = info.data.get('environment', BradaxEnvironment.DEVELOPMENT)
+            if env == BradaxEnvironment.PRODUCTION and v == 'dev-secret-change-in-production':
+                raise ValueError("JWT secret deve ser alterado em produção")
         return v
     
     def to_dict(self) -> Dict[str, Any]:
