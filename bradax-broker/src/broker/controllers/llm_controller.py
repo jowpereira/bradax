@@ -352,11 +352,20 @@ class LLMController(ServiceController):
         
         # Validações específicas por operação
         if operation in ["chat", "completion"]:
-            if "prompt" not in payload:
-                raise ValueError("prompt is required for chat/completion operations")
+            # Suportar tanto formato LangChain (messages) quanto formato legado (prompt)
+            if "messages" not in payload and "prompt" not in payload:
+                raise ValueError("messages or prompt is required for chat/completion operations")
             
-            if not isinstance(payload["prompt"], str) or len(payload["prompt"].strip()) == 0:
-                raise ValueError("prompt must be a non-empty string")
+            if "messages" in payload:
+                if not isinstance(payload["messages"], list) or len(payload["messages"]) == 0:
+                    raise ValueError("messages must be a non-empty list")
+                # Verificar se cada mensagem tem o formato correto
+                for msg in payload["messages"]:
+                    if not isinstance(msg, dict) or "content" not in msg:
+                        raise ValueError("each message must be a dict with 'content' field")
+            elif "prompt" in payload:
+                if not isinstance(payload["prompt"], str) or len(payload["prompt"].strip()) == 0:
+                    raise ValueError("prompt must be a non-empty string")
     
     def _validate_generate_request(self, data: Dict[str, Any]) -> None:
         """Valida dados de requisição de geração"""

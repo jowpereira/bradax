@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 from fastapi import HTTPException
 import time
 import uuid
+from datetime import datetime
 
 from ..controllers import ResourceController, ControllerResponse
 from ..storage.json_storage import JsonStorage
@@ -107,16 +108,18 @@ class ProjectController(ResourceController):
             project_id = str(uuid.uuid4())
             
             # Preparar dados do projeto
+            current_time = datetime.utcnow().isoformat() + "Z"
             project_data = {
-                "id": project_id,
+                "project_id": project_id,
                 "name": self._sanitize_input(data["name"]),
                 "description": self._sanitize_input(data.get("description", "")),
-                "created_at": time.time(),
-                "updated_at": time.time(),
-                "active": data.get("active", True),
-                "settings": data.get("settings", {}),
-                "api_key": self._generate_api_key(),
-                "permissions": data.get("permissions", self._default_permissions())
+                "created_at": current_time,
+                "updated_at": current_time,
+                "status": "active" if data.get("active", True) else "inactive",
+                "config": data.get("settings", {}),
+                "api_key_hash": self._generate_api_key(),
+                "owner": data.get("owner", ""),
+                "tags": data.get("tags", [])
             }
             
             # Salvar no storage
@@ -252,10 +255,20 @@ class ProjectController(ResourceController):
                 raise ValueError("Project name must be at least 3 characters")
     
     def _sanitize_project_data(self, project: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove dados sensíveis do projeto"""
+        """Remove dados sensíveis do projeto e ajusta campos para API"""
         safe_project = project.copy()
         # Remover API key das respostas públicas
         safe_project.pop("api_key", None)
+        safe_project.pop("api_key_hash", None)
+        
+        # Mapear project_id para id para compatibilidade com API
+        if "project_id" in safe_project:
+            safe_project["id"] = safe_project.pop("project_id")
+        
+        # Mapear config para settings para compatibilidade com API
+        if "config" in safe_project:
+            safe_project["settings"] = safe_project.pop("config")
+            
         return safe_project
     
     def _apply_filters(self, projects: List[Dict], filters: Dict) -> List[Dict]:

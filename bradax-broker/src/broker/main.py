@@ -161,7 +161,7 @@ def setup_routes(app: FastAPI):
     # NOVA ROTA: Gerenciamento de Projetos com Telemetria
     app.include_router(
         projects.router,
-        prefix=f"{api_v1_prefix}/management",
+        prefix=f"{api_v1_prefix}",
         tags=["Project Management", "Telemetria", "Guardrails"]
     )
     

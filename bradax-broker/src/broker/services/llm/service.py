@@ -30,15 +30,19 @@ class LLMService:
     
     def get_available_models(self) -> List[LLMModelInfo]:
         """Retorna modelos disponíveis"""
+        from .interfaces import LLMProviderType, LLMCapability
+        
         return [
             LLMModelInfo(
                 model_id="gpt-3.5-turbo",
-                provider_name="openai",
-                model_name="GPT-3.5 Turbo",
-                context_window=4096,
+                name="GPT-3.5 Turbo",
+                provider=LLMProviderType.OPENAI,
                 max_tokens=4096,
-                supports_streaming=True,
-                supports_function_calling=True
+                cost_per_1k_input=0.0015,
+                cost_per_1k_output=0.002,
+                capabilities=[LLMCapability.TEXT_GENERATION, LLMCapability.CODE_GENERATION],
+                enabled=True,
+                description="OpenAI's GPT-3.5 Turbo model"
             )
         ]
     
@@ -52,8 +56,14 @@ class LLMService:
             # Obter provider
             provider = get_provider("openai")
             
-            # Extrair mensagens
-            messages = payload.get("messages", [])
+            # Processar entrada: suportar tanto messages (LangChain) quanto prompt (legado)
+            if "messages" in payload:
+                messages = payload["messages"]
+            elif "prompt" in payload:
+                # Converter prompt string para formato messages
+                messages = [{"role": "user", "content": payload["prompt"]}]
+            else:
+                raise ValueError("Either 'messages' or 'prompt' must be provided")
             
             # Invocar
             result_text = provider.invoke(messages)

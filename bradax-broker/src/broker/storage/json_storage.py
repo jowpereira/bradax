@@ -64,6 +64,7 @@ class TelemetryData:
     client_ip: str = ""
     user_agent: str = ""
     error_message: str = ""
+    user_id: str = ""
     system_info: Dict[str, Any] = None
     
     def __post_init__(self):
@@ -71,6 +72,7 @@ class TelemetryData:
             self.system_info = {}
 
 
+@dataclass
 @dataclass
 class GuardrailEvent:
     """Estrutura de dados de eventos de guardrails"""
@@ -116,7 +118,7 @@ class JsonStorage:
         # Arquivos de dados
         self.projects_file = self.data_dir / "projects.json"
         self.telemetry_file = self.data_dir / "telemetry.json"
-        self.guardrails_file = self.data_dir / "guardrails.json"
+        self.guardrails_file = self.data_dir / "guardrail_events.json"
         self.system_file = self.data_dir / "system_info.json"
         
         # Lock para thread safety
@@ -166,18 +168,29 @@ class JsonStorage:
         with self._lock:
             # Carregar projetos
             projects_data = self._load_json_file(self.projects_file, {})
-            self._projects_cache = {
-                pid: ProjectData(**data) 
-                for pid, data in projects_data.items()
-            }
+            # Validar se projects_data é dict antes de processar
+            if isinstance(projects_data, dict) and projects_data:
+                self._projects_cache = {
+                    pid: ProjectData(**data) 
+                    for pid, data in projects_data.items()
+                }
+            else:
+                self._projects_cache = {}
             
             # Carregar telemetrias (últimas 1000)
             telemetry_data = self._load_json_file(self.telemetry_file, [])
             if isinstance(telemetry_data, list):
-                self._telemetry_cache = [
-                    TelemetryData(**item) 
-                    for item in telemetry_data[-1000:]  # Manter apenas os últimos 1000
-                ]
+                self._telemetry_cache = []
+                for item in telemetry_data[-1000:]:  # Manter apenas os últimos 1000
+                    # Converter event_id para request_id se necessário
+                    if 'event_id' in item and 'request_id' not in item:
+                        item['request_id'] = item.pop('event_id')
+                    try:
+                        self._telemetry_cache.append(TelemetryData(**item))
+                    except TypeError as e:
+                        # Pular itens com estrutura incompatível
+                        print(f"Aviso: Ignorando item de telemetria incompatível: {e}")
+                        continue
             else:
                 self._telemetry_cache = []
             
@@ -293,6 +306,12 @@ class JsonStorage:
         """Lista todos os projetos"""
         return list(self._projects_cache.values())
     
+    def load_projects(self) -> Dict[str, List[Dict]]:
+        """Retorna projetos no formato esperado pelos controllers"""
+        projects_list = self.list_projects()
+        projects_dict = [asdict(project) for project in projects_list]
+        return {"projects": projects_dict}
+    
     def delete_project(self, project_id: str) -> bool:
         """Remove um projeto"""
         with self._lock:
@@ -301,6 +320,20 @@ class JsonStorage:
                 self._save_projects()
                 return True
             return False
+    
+    def save_projects(self, projects_data: Dict[str, List[Dict]]):
+        """Salva projetos no formato esperado pelos controllers"""
+        with self._lock:
+            # Limpar cache atual
+            self._projects_cache.clear()
+            
+            # Recarregar projetos do formato do controller
+            for project_dict in projects_data.get("projects", []):
+                project = ProjectData(**project_dict)
+                self._projects_cache[project.project_id] = project
+            
+            # Salvar em disco
+            self._save_projects()
     
     def _save_projects(self):
         """Salva projetos em disco"""

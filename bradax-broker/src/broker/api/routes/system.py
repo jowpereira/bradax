@@ -24,7 +24,7 @@ async def get_system_health() -> Dict[str, Any]:
         Status detalhado de saúde do sistema
     """
     try:
-        return system_controller.get_system_health()
+        return system_controller.get_health_status()  # Método correto que existe
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -52,7 +52,7 @@ async def get_system_config() -> Dict[str, Any]:
         Configurações globais e de ambiente
     """
     try:
-        return system_controller.get_system_config()
+        return system_controller.get_configuration()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -80,6 +80,24 @@ async def get_services_status() -> Dict[str, Any]:
         Status detalhado de LLM, storage, etc.
     """
     try:
-        return system_controller.get_services_status()
+        return system_controller.get_service_status()  # Método correto (singular)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/telemetry")
+async def get_system_telemetry() -> Dict[str, Any]:
+    """
+    Dados de telemetria do sistema
+    
+    Returns:
+        Dados de telemetria e métricas de uso
+    """
+    try:
+        response = system_controller.get_telemetry_data()
+        if response.get("success"):
+            return response.get("data")
+        else:
+            raise HTTPException(status_code=500, detail=response.get("error", "Erro na telemetria"))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

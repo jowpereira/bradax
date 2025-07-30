@@ -1,30 +1,12 @@
 """
-Serv# Exportar inte__all__ = [
-    "llm",
-    "ILLMProvider", 
-    "LLMService",
-    "OpenAIProvider",
-    "ProviderFactory",
-    "llm_service"
-]principais
-from .llm import (
-    ILLMProvider,
-    LLMService,
-    OpenAIProvider,
-    ProviderFactory,
-    llm_service
-)dule - Bradax Broker
-
-Contém todos os serviços modernos seguindo padrões corporativos.
+Serviços principais do Broker
 """
 
-# Importar novo módulo LLM
-from . import llm
-
-# Exportar interfaces principais
+# Exportar interfaces e serviços principais
 from .llm import (
-    ILLMProvider,
+    ILLMProvider, 
     LLMService,
+    OpenAIProvider,
     llm_service
 )
 
@@ -32,6 +14,6 @@ __all__ = [
     "llm",
     "ILLMProvider", 
     "LLMService",
-    "LangChainProviderFactory",
+    "OpenAIProvider",
     "llm_service"
 ]

@@ -207,6 +207,47 @@ class SystemController(BaseController):
             self._log_response("get_configuration", False, {"error": str(e)})
             raise self._handle_error(e, "get_configuration")
     
+    def get_telemetry_data(self) -> Dict[str, Any]:
+        """Recupera dados de telemetria do sistema"""
+        try:
+            self._log_request("get_telemetry_data", {})
+            
+            # Obter dados de telemetria do storage
+            telemetry_data = {
+                "total_requests": 0,
+                "total_errors": 0,
+                "avg_response_time": 0.0,
+                "active_projects": 0,
+                "last_activity": None,
+                "endpoints_accessed": [],
+                "system_metrics": []
+            }
+            
+            # Contar projetos ativos
+            projects = self.storage.list_projects()
+            telemetry_data["active_projects"] = len([p for p in projects if p.status == "active"])
+            
+            # Simular métricas básicas (melhorar depois quando telemetria real estiver implementada)
+            telemetry_data["total_requests"] = len(projects) * 10  # Placeholder
+            telemetry_data["endpoints_accessed"] = [
+                "/health", "/api/v1/system/info", "/api/v1/llm/models", "/api/v1/system/telemetry"
+            ]
+            telemetry_data["system_metrics"] = [
+                {"timestamp": time.time(), "value": 100, "metric": "cpu_usage"},
+                {"timestamp": time.time(), "value": 75, "metric": "memory_usage"}
+            ]
+            
+            self._log_response("get_telemetry_data", True, {"metrics_count": len(telemetry_data["system_metrics"])})
+            
+            return ControllerResponse.success(
+                data=telemetry_data,
+                message="Telemetry data retrieved"
+            )
+            
+        except Exception as e:
+            self._log_response("get_telemetry_data", False, {"error": str(e)})
+            raise self._handle_error(e, "get_telemetry_data")
+    
     def _check_storage_health(self) -> Dict[str, Any]:
         """Verifica saúde do sistema de storage"""
         try:
