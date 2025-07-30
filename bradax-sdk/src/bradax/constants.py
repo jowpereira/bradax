@@ -114,3 +114,29 @@ def validate_api_key(api_key: str) -> bool:
         api_key.startswith(SDKSecurityConstants.API_KEY_PREFIX) and
         len(api_key) >= SDKSecurityConstants.API_KEY_MIN_LENGTH
     )
+
+
+class SDKConstants:
+    """Classe unificada com constantes principais do SDK para retrocompatibilidade"""
+    
+    # Timeout
+    DEFAULT_TIMEOUT = SDKNetworkConstants.REQUEST_TIMEOUT
+    
+    # URL do broker
+    DEFAULT_BROKER_URL = SDKNetworkConstants.DEVELOPMENT_HUB_URL
+    
+    # Regras de guardrails padrão
+    GUARDRAIL_RULES = [
+        {
+            "id": "no_secrets",
+            "pattern": r"(password|senha|secret|token|key)",
+            "severity": "high",
+            "description": "Detecta possíveis secrets/senhas nos prompts"
+        },
+        {
+            "id": "no_pii",
+            "pattern": r"(\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})",
+            "severity": "medium", 
+            "description": "Detecta CPF/CNPJ nos prompts"
+        }
+    ]

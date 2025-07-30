@@ -24,6 +24,7 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=3, max_length=100, description="Nome do projeto")
     description: Optional[str] = Field(None, max_length=500, description="Descrição do projeto")
     active: Optional[bool] = Field(True, description="Projeto ativo")
+    settings: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Configurações do projeto")
 
 
 class UpdateProjectRequest(BaseModel):
@@ -55,7 +56,7 @@ async def list_projects():
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
-@router.post("/", response_model=Dict[str, Any])
+@router.post("/", response_model=Dict[str, Any], status_code=201)
 async def create_project(project_data: CreateProjectRequest):
     """
     Cria um novo projeto
@@ -67,7 +68,7 @@ async def create_project(project_data: CreateProjectRequest):
         Dict: Projeto criado
     """
     try:
-        response = project_controller.create_resource(project_data.dict())
+        response = project_controller.create_resource(project_data.model_dump())
         if response.get("success"):
             return response.get("data")
         else:

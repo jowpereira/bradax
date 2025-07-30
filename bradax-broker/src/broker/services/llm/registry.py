@@ -39,7 +39,15 @@ class LLMRegistry(ILLMRegistry):
         """Lê dados do arquivo JSON"""
         try:
             with open(self.file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                
+                # Se for um objeto em vez de lista, assumir que não há modelos registrados
+                if isinstance(data, dict):
+                    return []
+                elif isinstance(data, list):
+                    return data
+                else:
+                    return []
         except (json.JSONDecodeError, FileNotFoundError):
             return []
     
@@ -61,6 +69,17 @@ class LLMRegistry(ILLMRegistry):
             
             for model_data in models_data:
                 try:
+                    # Verificar se model_data é um dicionário
+                    if not isinstance(model_data, dict):
+                        print(f"⚠️ Dados de modelo inválidos (não é dict): {type(model_data)} - {model_data}")
+                        continue
+                    
+                    # Verificar campos obrigatórios
+                    required_fields = ["model_id", "provider", "capabilities"]
+                    if not all(field in model_data for field in required_fields):
+                        print(f"⚠️ Campos obrigatórios ausentes em: {model_data}")
+                        continue
+                    
                     # Converter strings de enum de volta para enums
                     provider = LLMProviderType(model_data["provider"])
                     capabilities = [LLMCapability(cap) for cap in model_data["capabilities"]]
@@ -80,8 +99,9 @@ class LLMRegistry(ILLMRegistry):
                     
                     self._models_cache[model.model_id] = model
                     
-                except (KeyError, ValueError) as e:
-                    print(f"Erro ao carregar modelo {model_data}: {e}")
+                except (KeyError, ValueError, TypeError) as e:
+                    print(f"⚠️ Erro ao carregar modelo {model_data}: {e}")
+                    continue
     
     def _save_models(self) -> bool:
         """Salva modelos do cache para arquivo"""

@@ -57,7 +57,8 @@ class BradaxSDKConfig:
     broker_url: str
     timeout: int
     
-    # Autenticação
+    # Autenticação e projeto
+    project_id: str
     api_key_prefix: str
     
     # Validação
@@ -70,10 +71,16 @@ class BradaxSDKConfig:
     
     # Guardrails personalizados (além dos defaults do projeto)
     custom_guardrails: Dict[str, Any]
+    enable_guardrails: bool
+    guardrail_rules: List[str]
     
     # Telemetria local (incrementa a do broker)
     local_telemetry_enabled: bool
+    enable_telemetry: bool
     telemetry_buffer_size: int
+    
+    # Custom settings do usuário
+    custom_settings: Dict[str, Any]
     
     @classmethod
     def from_environment(cls) -> "BradaxSDKConfig":
@@ -85,17 +92,25 @@ class BradaxSDKConfig:
         """
         env = get_environment()
         
+        # Ler URL do broker das variáveis de ambiente ou usar default
+        broker_url = os.getenv("BRADAX_SDK_BROKER_URL", get_broker_url())
+        
         return cls(
-            broker_url=get_broker_url(),
+            broker_url=broker_url,
             timeout=NetworkConstants.HTTP_REQUEST_TIMEOUT,
+            project_id=os.getenv("BRADAX_SDK_PROJECT_ID", "test-integration-project"),
             api_key_prefix=SecurityConstants.API_KEY_PREFIX,
             min_valid_year=ValidationConstants.MIN_VALID_YEAR,
             max_valid_year=ValidationConstants.MAX_VALID_YEAR,
             environment=env,
             debug=(env == "development"),
             custom_guardrails={},  # Inicialmente vazio, configurado via set_custom_guardrail()
+            enable_guardrails=True,
+            guardrail_rules=["default"],
             local_telemetry_enabled=True,
-            telemetry_buffer_size=100
+            enable_telemetry=True,
+            telemetry_buffer_size=100,
+            custom_settings={}
         )
     
     @classmethod
@@ -110,6 +125,60 @@ class BradaxSDKConfig:
         config.timeout = TestingConstants.TEST_TIMEOUT if hasattr(TestingConstants, 'TEST_TIMEOUT') else 5
         config.debug = True
         return config
+
+    @classmethod
+    def for_integration_tests(
+        cls,
+        broker_url: str = "http://localhost:8000",
+        project_id: str = "test-project",
+        api_key: Optional[str] = None,
+        enable_telemetry: bool = True,
+        enable_guardrails: bool = True,
+        timeout: int = 30,
+        **kwargs
+    ) -> "BradaxSDKConfig":
+        """
+        Cria configuração para testes de integração.
+        
+        Args:
+            broker_url: URL do broker
+            project_id: ID do projeto
+            api_key: API key (ignorada por enquanto)
+            enable_telemetry: Habilitar telemetria
+            enable_guardrails: Habilitar guardrails
+            timeout: Timeout em segundos
+            **kwargs: Parâmetros adicionais
+            
+        Returns:
+            Configuração específica para testes
+        """
+        # Validar broker_url
+        if not broker_url.startswith(("http://", "https://")):
+            raise ValueError(f"broker_url deve começar com http:// ou https://, recebido: {broker_url}")
+        
+        if not project_id or not project_id.strip():
+            raise ValueError("project_id não pode estar vazio")
+            
+        if api_key is not None and (not api_key or not api_key.strip()):
+            raise ValueError("api_key não pode estar vazia")
+        
+        return cls(
+            broker_url=broker_url,
+            timeout=timeout,
+            project_id=project_id,
+            api_key_prefix=SecurityConstants.API_KEY_PREFIX,
+            min_valid_year=ValidationConstants.MIN_VALID_YEAR,
+            max_valid_year=ValidationConstants.MAX_VALID_YEAR,
+            environment="testing",
+            debug=True,
+            custom_guardrails=kwargs.get("custom_settings", {}) if kwargs.get("custom_settings") else {},
+            enable_guardrails=enable_guardrails,
+            guardrail_rules=["default"],
+            local_telemetry_enabled=enable_telemetry,
+            enable_telemetry=enable_telemetry,
+            telemetry_buffer_size=100,
+            custom_settings=kwargs.get("custom_settings", {})
+        )
     
     def is_production(self) -> bool:
         """Verifica se está em ambiente de produção."""

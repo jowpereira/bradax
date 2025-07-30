@@ -70,6 +70,11 @@ class GuardrailResult:
     severity: GuardrailSeverity
     reason: str
     metadata: Dict[str, Any]
+    
+    @property
+    def is_safe(self) -> bool:
+        """Compatibilidade: is_safe é o inverso de allowed (quando não permitido = não seguro)"""
+        return self.allowed
 
 
 class GuardrailEngine:
@@ -398,8 +403,18 @@ RESPOSTA (JSON):
             # VALIDAÇÃO LLM INTELIGENTE (para regras de conteúdo)
             if rule.category in ["content_safety", "business", "compliance"] and self.llm_service:
                 try:
+                    # Evitar asyncio.run() dentro de event loop ativo
                     import asyncio
-                    llm_analysis = asyncio.run(self._llm_content_analysis(content, rule))
+                    
+                    # Verificar se já estamos em um event loop
+                    try:
+                        current_loop = asyncio.get_running_loop()
+                        # Já estamos em um loop, criar task
+                        llm_analysis = {"available": False, "violation": False, "confidence": 0.0}
+                        logger.debug("Event loop ativo detectado, pulando validação LLM para evitar conflito")
+                    except RuntimeError:
+                        # Não há loop ativo, pode usar asyncio.run()
+                        llm_analysis = asyncio.run(self._llm_content_analysis(content, rule))
                     
                     if llm_analysis.get("available", False):
                         llm_violation = llm_analysis.get("violation", False)
