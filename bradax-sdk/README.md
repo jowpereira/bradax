@@ -1,66 +1,99 @@
-# Bradax SDK - Cliente Python Corporativo
+# Bradax SDK - Interface LangChain Corporativa
 
-> **SDK Python profissional para integração segura com o Bradax Broker. Inclui autenticação por projeto, guardrails personalizados e telemetria local.**
+> **SDK Python com interface LangChain-compatível para integração segura com o Bradax Broker. Governança empresarial integrada.**
 
-## 🎯 Visão Geral
+## 🎯 Interface Principal LangChain
 
-O Bradax SDK é o cliente oficial para comunicação com o Bradax Broker, projetado para ambientes corporativos que exigem controle total sobre operações de LLM.
+O Bradax SDK agora oferece interface **100% compatível com LangChain** para máxima produtividade:
 
-```mermaid
-graph LR
-    APP[Aplicação] --> SDK[Bradax SDK]
-    SDK --> AUTH[Autenticação]
-    SDK --> GUARD[Guardrails Locais]
-    SDK --> TELEM[Telemetria Local]
-    SDK -->|HTTPS| BROKER[Bradax Broker]
-    
-    subgraph "SDK Components"
-        CLIENT[BradaxClient]
-        CONFIG[Configuração]
-        EXCEPT[Exceções]
-    end
-```
-
-## 🚀 Uso Básico
-
-### Inicialização Simples
-```python
-from bradax import BradaxClient
-
-# Cliente básico
-client = BradaxClient(
-    project_token="proj_acme_2025_ai_assistant_001",
-    broker_url="https://llm.empresa.com"
-)
-
-# Execução de LLM
-response = client.run_llm(
-    prompt="Analise este relatório de vendas...",
-    model="gpt-4o-mini",
-    max_tokens=1000
-)
-
-print(response["content"])
-```
-
-### Configuração Avançada
 ```python
 from bradax import BradaxClient
 from bradax.config import BradaxSDKConfig
 
-# Configuração personalizada
-config = BradaxSDKConfig.from_environment()
-config.set_custom_guardrail("content_safety", {
-    "max_chars": 5000,
-    "forbidden_patterns": ["senha", "cpf"],
-    "check_encoding": "utf-8"
-})
-
-# Cliente com configuração
-client = BradaxClient(
-    project_token="proj_acme_2025_ai_assistant_001",
-    config=config
+# Configuração corporativa
+config = BradaxSDKConfig.for_production(
+    broker_url="https://api.bradax.com",
+    project_id="seu-projeto",
+    api_key="sua-chave-api"
 )
+
+client = BradaxClient(config)
+
+# Interface LangChain padrão - MÉTODO PRINCIPAL
+response = client.invoke("Analise este relatório financeiro")
+print(response["content"])
+
+# Interface assíncrona LangChain
+response = await client.ainvoke("Gere resumo executivo") 
+print(response["content"])
+```
+
+## 🏗️ Configurações por Ambiente
+
+### 🛠️ Desenvolvimento (Recomendado para Desenvolvedores)
+```python
+# Para desenvolvimento local e testes
+config = BradaxSDKConfig.for_development(
+    broker_url="http://localhost:8000",    # Broker local
+    project_id="dev-projeto",
+    enable_telemetry=False,               # Reduz overhead
+    enable_guardrails=False,              # Mais flexível
+    timeout=30
+)
+```
+
+### 🧪 Testes Unitários
+```python
+# Para testes automatizados
+config = BradaxSDKConfig.for_testing(
+    project_id="test-projeto",
+    enable_telemetry=False,
+    enable_guardrails=False
+)
+```
+
+### ⚠️ Produção (Uso Interno - Deploy Automático)
+```python
+# ATENÇÃO: Esta configuração é usada apenas pela esteira de CI/CD
+# Desenvolvedores NÃO devem usar esta configuração diretamente
+# Testes em produção são executados pelo sistema de deploy
+config = BradaxSDKConfig.for_production(
+    broker_url="https://api.bradax.com",  # HTTPS obrigatório
+    project_id="projeto-prod",
+    api_key="prod-api-key",              # Obrigatório
+    enable_telemetry=True,
+    enable_guardrails=True,
+    timeout=60
+```
+
+## 📦 Instalação Rápida
+
+```bash
+pip install bradax-sdk
+```
+
+## 🚀 Configuração Avançada
+
+### Guardrails Personalizados
+```python
+from bradax import BradaxClient
+from bradax.config import BradaxSDKConfig
+
+# Configuração para desenvolvimento com guardrails customizados
+config = BradaxSDKConfig.for_development(
+    broker_url="http://localhost:8000",
+    project_id="projeto-com-guardrails",
+    enable_guardrails=True
+)
+
+client = BradaxClient(config)
+
+# Adicionar regras de guardrail personalizadas
+client.add_custom_guardrail_rule({
+    "id": "content_safety",
+    "pattern": "senha|cpf|cartão",
+    "severity": "HIGH"
+})
 ```
 
 ## 🛡️ Guardrails Personalizados
@@ -71,76 +104,72 @@ client = BradaxClient(
 
 ### Adicionar Guardrails Locais
 ```python
-# Guardrail de tamanho de conteúdo
-client.add_custom_guardrail("content_length", {
-    "max_chars": 10000,
-    "min_chars": 10,
-    "check_empty": True
+# Guardrail de segurança de dados
+client.add_custom_guardrail_rule({
+    "id": "data_security",
+    "pattern": "confidencial|secreto|interno",
+    "severity": "CRITICAL"
 })
 
-# Guardrail de filtro de conteúdo
-client.add_custom_guardrail("content_filter", {
-    "forbidden_words": ["confidencial", "secreto"],
-    "case_sensitive": False,
-    "action": "block"  # ou "warn"
+# Guardrail de compliance
+client.add_custom_guardrail_rule({
+    "id": "compliance_check", 
+    "pattern": "dados pessoais|informação privada",
+    "severity": "HIGH"
 })
 
-# Guardrail de validação de entrada
-client.add_custom_guardrail("input_validation", {
-    "require_question_mark": True,
-    "max_sentences": 5,
-    "language": "pt-BR"
+# Guardrail de qualidade de entrada
+client.add_custom_guardrail_rule({
+    "id": "input_quality",
+    "pattern": "^.{0,5}$",  # Texto muito curto
+    "severity": "MEDIUM"
 })
 
-# Listar guardrails ativos
-guardrails = client.list_custom_guardrails()
-print(f"Guardrails personalizados: {len(guardrails)}")
+# Verificar se conteúdo passa pelos guardrails
+is_valid = client.validate_content("Este texto está seguro para processamento")
+print(f"Conteúdo válido: {is_valid}")
 ```
 
-### Gerenciar Guardrails
-```python
-# Remover guardrail específico
-removed = client.remove_custom_guardrail("content_length")
-if removed:
-    print("Guardrail removido com sucesso")
+## 📊 Uso LangChain-Compatible
 
-# Verificar guardrails ativos
-active_guards = client.list_custom_guardrails()
-for name, config in active_guards.items():
-    print(f"- {name}: {config}")
+### Exemplos Práticos com invoke()
+```python
+# Exemplo 1: String simples
+response = client.invoke("Resuma este documento em 3 pontos principais")
+print(response["content"])
+
+# Exemplo 2: Lista de mensagens (formato LangChain)
+messages = [
+    {"role": "system", "content": "Você é um assistente especializado em análise de dados"},
+    {"role": "user", "content": "Analise estas vendas: Q1: 100k, Q2: 120k, Q3: 95k"}
+]
+response = client.invoke(messages)
+print(response["content"])
+
+# Exemplo 3: Configuração avançada
+response = client.invoke(
+    "Explique machine learning",
+    config={"model": "gpt-4", "temperature": 0.1},
+    max_tokens=500
+)
+print(f"Modelo usado: {response['response_metadata']['model']}")
+
+# Exemplo 4: Uso assíncrono
+async def process_document(document_text):
+    response = await client.ainvoke([
+        {"role": "user", "content": f"Analise este documento: {document_text}"}
+    ])
+    return response["content"]
 ```
 
-## 📊 Telemetria Local
-
-### Configuração de Telemetria
+### Verificação de Saúde e Status
 ```python
-# A telemetria do PROJETO é sempre obrigatória (definida no broker)
-# Esta é apenas a telemetria ADICIONAL local do SDK
-
-# Verificar configuração atual
-telem_config = client.get_telemetry_config()
-print(f"Telemetria local: {telem_config['local_enabled']}")
-print(f"Buffer size: {telem_config['buffer_size']}")
-print(f"Ambiente: {telem_config['environment']}")
-
-# Telemetria local coleta métricas adicionais:
-# - Latência de rede
-# - Tentativas de reconexão  
-# - Guardrails locais acionados
-# - Cache hits/misses
-```
-
-### Dados Coletados Localmente
-```python
-# Exemplo de telemetria local adicional
-{
-    "sdk_version": "1.0.0",
-    "local_latency_ms": 45,
-    "guardrails_triggered": ["content_length"],
-    "retry_attempts": 0,
-    "local_cache_hit": False,
-    "request_timestamp": "2025-07-29T01:30:00Z"
-}
+# Verificar se broker está disponível
+try:
+    health = client.check_broker_health()
+    print(f"Broker status: {health['status']}")
+except Exception as e:
+    print(f"Broker indisponível: {e}")
 ```
 
 ## 🔧 Configuração Centralizada

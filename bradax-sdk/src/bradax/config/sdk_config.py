@@ -127,7 +127,7 @@ class BradaxSDKConfig:
         return config
 
     @classmethod
-    def for_integration_tests(
+    def for_testing(
         cls,
         broker_url: str = "http://localhost:8000",
         project_id: str = "test-project",
@@ -138,7 +138,7 @@ class BradaxSDKConfig:
         **kwargs
     ) -> "BradaxSDKConfig":
         """
-        Cria configuração para testes de integração.
+        Cria configuração para testes (development/testing).
         
         Args:
             broker_url: URL do broker
@@ -177,6 +177,125 @@ class BradaxSDKConfig:
             local_telemetry_enabled=enable_telemetry,
             enable_telemetry=enable_telemetry,
             telemetry_buffer_size=100,
+            custom_settings=kwargs.get("custom_settings", {})
+        )
+    
+    @classmethod
+    def for_integration_tests(cls, **kwargs) -> "BradaxSDKConfig":
+        """
+        DEPRECADO: Use for_testing() em vez deste método.
+        Mantido para compatibilidade com código existente.
+        """
+        import warnings
+        warnings.warn(
+            "for_integration_tests() está deprecado. Use for_testing() para nomenclatura mais adequada.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return cls.for_testing(**kwargs)
+    
+    @classmethod
+    def for_production(
+        cls,
+        broker_url: str,
+        project_id: str,
+        api_key: str,
+        enable_telemetry: bool = True,
+        enable_guardrails: bool = True,
+        timeout: int = 60,
+        **kwargs
+    ) -> "BradaxSDKConfig":
+        """
+        Cria configuração para ambiente de produção.
+        
+        IMPORTANTE: Esta configuração é usada apenas pelo sistema de deploy automático.
+        Desenvolvedores não devem usar esta configuração diretamente.
+        Testes em produção são executados pela esteira de CI/CD.
+        
+        Args:
+            broker_url: URL do broker (obrigatório, HTTPS)
+            project_id: ID do projeto (obrigatório)
+            api_key: API key (obrigatório)
+            enable_telemetry: Habilitar telemetria
+            enable_guardrails: Habilitar guardrails
+            timeout: Timeout em segundos
+            **kwargs: Parâmetros adicionais
+            
+        Returns:
+            Configuração específica para produção (uso interno do deploy)
+        """
+        # Validações mais rigorosas para produção
+        if not broker_url or not broker_url.strip():
+            raise ValueError("broker_url é obrigatório para produção")
+        if not broker_url.startswith("https://"):
+            raise ValueError("broker_url deve usar HTTPS em produção")
+        if not project_id or not project_id.strip():
+            raise ValueError("project_id é obrigatório para produção")
+        if not api_key or not api_key.strip():
+            raise ValueError("api_key é obrigatória para produção")
+        
+        return cls(
+            broker_url=broker_url,
+            timeout=timeout,
+            project_id=project_id,
+            api_key_prefix=SecurityConstants.API_KEY_PREFIX,
+            min_valid_year=ValidationConstants.MIN_VALID_YEAR,
+            max_valid_year=ValidationConstants.MAX_VALID_YEAR,
+            environment="production",
+            debug=False,
+            custom_guardrails=kwargs.get("custom_settings", {}) if kwargs.get("custom_settings") else {},
+            enable_guardrails=enable_guardrails,
+            guardrail_rules=["strict", "compliance"],
+            local_telemetry_enabled=enable_telemetry,
+            enable_telemetry=enable_telemetry,
+            telemetry_buffer_size=1000,
+            custom_settings=kwargs.get("custom_settings", {})
+        )
+    
+    @classmethod
+    def for_development(
+        cls,
+        broker_url: str = "http://localhost:8000",
+        project_id: str = "dev-project",
+        api_key: Optional[str] = None,
+        enable_telemetry: bool = False,
+        enable_guardrails: bool = False,
+        timeout: int = 30,
+        **kwargs
+    ) -> "BradaxSDKConfig":
+        """
+        Cria configuração para ambiente de desenvolvimento local.
+        
+        Esta é a configuração recomendada para desenvolvedores.
+        Use esta configuração para desenvolvimento e testes locais.
+        
+        Args:
+            broker_url: URL do broker local
+            project_id: ID do projeto de desenvolvimento
+            api_key: API key (opcional para desenvolvimento)
+            enable_telemetry: Habilitar telemetria local
+            enable_guardrails: Habilitar guardrails locais
+            timeout: Timeout em segundos
+            **kwargs: Parâmetros adicionais
+            
+        Returns:
+            Configuração específica para desenvolvimento
+        """
+        return cls(
+            broker_url=broker_url,
+            timeout=timeout,
+            project_id=project_id,
+            api_key_prefix=SecurityConstants.API_KEY_PREFIX,
+            min_valid_year=ValidationConstants.MIN_VALID_YEAR,
+            max_valid_year=ValidationConstants.MAX_VALID_YEAR,
+            environment="development",
+            debug=True,
+            custom_guardrails=kwargs.get("custom_settings", {}) if kwargs.get("custom_settings") else {},
+            enable_guardrails=enable_guardrails,
+            guardrail_rules=["basic"],
+            local_telemetry_enabled=enable_telemetry,
+            enable_telemetry=enable_telemetry,
+            telemetry_buffer_size=50,
             custom_settings=kwargs.get("custom_settings", {})
         )
     

@@ -1,50 +1,65 @@
-# Método invoke_generic - Wrapper LangChain Bradax
+# Compatibilidade LangChain - Métodos invoke() e ainvoke()
 
 ## Visão Geral
 
-O método `invoke_generic()` é o ponto central de integração entre o SDK bradax e o wrapper LangChain. Ele fornece uma interface única e flexível para executar diferentes tipos de operações LLM, mantendo todos os guardrails, telemetria e governança centralizados no hub.
+O sistema Bradax agora oferece **compatibilidade completa com LangChain** através dos métodos `invoke()` e `ainvoke()`. Estes métodos fornecem uma interface padronizada que permite aos usuários utilizarem o SDK como se fosse uma implementação nativa do LangChain, mantendo todos os guardrails, telemetria e governança centralizados no broker.
 
 ## Características Principais
 
-### 🔧 **Flexibilidade Total**
-- Suporte a múltiplas operações: `chat`, `completion`, `batch`, `stream`, `embedding`
-- Payload completamente customizável para diferentes necessidades
-- Compatibilidade com qualquer formato de entrada do LangChain
+### 🔧 **Compatibilidade LangChain Nativa**
+- Métodos `invoke()` e `ainvoke()` seguem exatamente o padrão LangChain
+- Suporte a múltiplos formatos de entrada: string, lista de mensagens, prompts complexos
+- Formato de resposta compatível com LangChain (`content` + `response_metadata`)
+- Processamento automático de diferentes tipos de input
 
-### 🛡️ **Governança Centralizada**
-- Guardrails aplicados automaticamente pelo hub (não contornáveis)
+### 🛡️ **Governança Mantida**
+- Guardrails aplicados automaticamente pelo broker (não contornáveis)
 - Telemetria extensiva e obrigatória
-- Autenticação e autorização por projeto
+- Autenticação e autorização por projeto mantidas
 - Auditoria completa de todas as operações
 
-### 📊 **Telemetria Automática**
-- Rastreamento de tempo de resposta
-- Contagem de tokens utilizados
-- Logs estruturados de erros e sucessos
-- Métricas de performance por projeto
+### 📊 **Formato Híbrido de Comunicação**
+- **Padrão**: Formato `messages` (LangChain) para novas implementações
+- **Compatibilidade**: Formato `prompt` (legado) ainda suportado
+- Conversão automática entre formatos no broker
 
-## Interface do Método
+## Interface dos Métodos
 
-### SDK (Cliente)
+### SDK (Cliente LangChain-Compatible)
 
 ```python
-def invoke_generic(
+def invoke(
     self,
-    operation: str,          # Tipo de operação
-    model_id: str,          # ID do modelo
-    payload: Dict[str, Any], # Payload flexível
-    request_id: Optional[str] = None  # ID opcional
+    input_: Union[str, List[Dict[str, str]], Dict[str, Any]],
+    config: Optional[Dict[str, Any]] = None,
+    **kwargs
 ) -> Dict[str, Any]:
+    """
+    Método invoke compatível com LangChain.
+    
+    Aceita:
+    - String simples: "Hello, world!"
+    - Lista de mensagens: [{"role": "user", "content": "Hello"}]
+    - Prompt complexo: {"messages": [...], "model": "gpt-4"}
+    """
+
+async def ainvoke(
+    self,
+    input_: Union[str, List[Dict[str, str]], Dict[str, Any]], 
+    config: Optional[Dict[str, Any]] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """Versão assíncrona do invoke()"""
 ```
 
-### Broker (Serviço)
+### Broker (Processamento Híbrido)
 
 ```python
-async def invoke_generic(
+async def invoke(
     self,
     operation: str,
     model_id: str,
-    payload: Dict[str, Any],
+    payload: Dict[str, Any],  # Suporta 'messages' OU 'prompt'
     project_id: Optional[str] = None,
     request_id: Optional[str] = None
 ) -> Dict[str, Any]:

@@ -148,9 +148,9 @@ class JsonStorage:
         """Carrega arquivo JSON com fallback"""
         try:
             if file_path.exists():
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, 'r', encoding='utf-8-sig') as f:
                     return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError) as e:
+        except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as e:
             print(f"Erro ao carregar {file_path}: {e}")
         
         return default_value or {}

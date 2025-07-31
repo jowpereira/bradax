@@ -149,104 +149,11 @@ class BradaxClient:
         except httpx.RequestError as e:
             raise BradaxConnectionError(f"Não foi possível conectar ao broker: {str(e)}")
             
-    def run_llm(self, 
-               prompt: str, 
-               model: str = "gpt-4.1-nano", 
-               max_tokens: int = 1000,
-               temperature: float = 0.7,
-               system_message: str = None,
-               options: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Executa um modelo LLM através do broker.
-        
-        Args:
-            prompt: O texto do prompt
-            model: Nome do modelo (padrão: gpt-4.1-nano)
-            max_tokens: Número máximo de tokens na resposta
-            temperature: Temperatura (criatividade) da resposta
-            system_message: Mensagem de sistema opcional
-            options: Opções adicionais para o modelo
-            
-        Returns:
-            Resultado da execução do LLM
-            
-        Raises:
-            BradaxError: Se ocorrer algum erro durante a execução
-        """
-        options = options or {}
-        
-        payload = {
-            "operation": "chat",  # Campo obrigatório para o broker
-            "model": model,
-            "payload": {
-                "prompt": prompt,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "options": options
-            }
-        }
-        
-        if system_message:
-            payload["payload"]["system_message"] = system_message
-            
-        try:
-            response = self.client.post(
-                f"{self.broker_url}/api/v1/llm/invoke",
-                json=payload
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                raise BradaxBrokerError(f"Erro ao executar LLM: {response.text}")
-                
-        except httpx.RequestError as e:
-            raise BradaxConnectionError(f"Falha de conexão ao executar LLM: {str(e)}")
-            
-    def run_langchain(self, 
-                     chain_type: str,
-                     inputs: Dict[str, Any],
-                     options: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Executa uma chain do LangChain através do broker.
-        
-        Args:
-            chain_type: Tipo de chain a ser executada
-            inputs: Entradas para a chain
-            options: Opções adicionais para configuração da chain
-            
-        Returns:
-            Resultado da execução da chain
-            
-        Raises:
-            BradaxError: Se ocorrer algum erro durante a execução
-        """
-        options = options or {}
-        
-        payload = {
-            "chain_type": chain_type,
-            "inputs": inputs,
-            "options": options
-        }
-        
-        try:
-            response = self.client.post(
-                f"{self.broker_url}/api/v1/langchain/run",
-                json=payload
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                raise BradaxBrokerError(
-                    f"Erro ao executar LangChain: {response.text}",
-                    status_code=response.status_code,
-                    response_body=response.text,
-                    endpoint="/api/v1/langchain/run"
-                )
-                
-        except httpx.RequestError as e:
-            raise BradaxConnectionError(f"Falha de conexão ao executar LangChain: {str(e)}")
+    # REMOVIDO: run_llm() - Redundante com invoke()
+    # Use invoke() para execução de LLM com compatibilidade LangChain
+    
+    # REMOVIDO: run_langchain() - Redundante com invoke() e ainvoke()
+    # Use invoke() ou ainvoke() para compatibilidade LangChain completa
             
     def invoke_generic(
         self,
@@ -625,212 +532,35 @@ class BradaxClient:
         except httpx.RequestError as e:
             raise BradaxConnectionError(f"Falha de conexão ao executar ainvoke: {str(e)}")
     
-    def invoke_generic(
-        self,
-        operation: str,
-        model: str,
-        payload: Dict[str, Any],
-        request_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    # REMOVIDO: Métodos duplicados invoke_generic() e generate_text()
+    # Use os métodos originais definidos anteriormente no arquivo
+    
+    def check_broker_health(self) -> Dict[str, Any]:
         """
-        Método de invocação genérica para operações avançadas.
+        Verifica saúde do broker.
         
-        Use este método para operações especiais que não são cobertas
-        pelo método invoke() padrão do LangChain.
-        
-        Args:
-            operation: Tipo de operação ('chat', 'completion', 'batch', 'stream', etc.)
-            model: ID do modelo LLM
-            payload: Dados específicos da operação (prompts, parâmetros, etc.)
-            request_id: ID opcional da requisição
-            
         Returns:
-            Resultado da operação com metadados
+            Status de saúde do broker
             
         Raises:
-            BradaxError: Para qualquer erro de execução
+            BradaxConnectionError: Se não conseguir conectar ao broker
         """
         try:
-            # Preparar dados da requisição
-            request_data = {
-                "operation": operation,
-                "model": model,
-                "payload": payload,
-                "project_id": self._extract_project_id(),
-                "request_id": request_id
-            }
-            
-            # Executar via broker
-            response = self.client.post(
-                f"{self.broker_url}/api/v1/llm/invoke",
-                json=request_data,
-                timeout=self.timeout
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if self.verbose:
-                    print(f"✅ Invoke {operation} concluído: {result.get('request_id', 'N/A')}")
-                return result
-            else:
-                error_msg = f"Invoke {operation} falhou: {response.text}"
-                if self.verbose:
-                    print(f"❌ {error_msg}")
-                raise BradaxBrokerError(
-                    error_msg,
-                    error_code="INVOKE_HTTP_ERROR",
-                    context={
-                        "status_code": response.status_code,
-                        "response_body": response.text,
-                        "endpoint": "/api/v1/llm/invoke",
-                        "operation": operation,
-                        "model": model
-                    }
-                )
-                
-        except httpx.RequestError as e:
-            error_msg = f"Erro de conexão no invoke: {str(e)}"
-            if self.verbose:
-                print(f"❌ {error_msg}")
-            raise BradaxConnectionError(
-                error_msg,
-                error_code="INVOKE_CONNECTION_ERROR",
-                context={
-                    "broker_url": self.broker_url,
-                    "timeout": self.timeout,
-                    "operation": operation,
-                    "model": model
-                }
-            )
-        except Exception as e:
-            error_msg = f"Erro inesperado no invoke: {str(e)}"
-            if self.verbose:
-                print(f"❌ {error_msg}")
-            raise BradaxError(error_msg)
-
-    def generate_text(
-        self,
-        prompt: str,
-        model: str = "gpt-4o-mini",
-        system_prompt: Optional[str] = None,
-        max_tokens: int = 1000,
-        temperature: float = 0.7,
-        stream: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Método de conveniência para geração de texto.
-        
-        Usa invoke() internamente para operação 'chat'.
-        Interface simples para casos básicos de uso.
-        
-        Args:
-            prompt: Texto de entrada
-            model: Modelo a ser usado
-            system_prompt: Prompt de sistema opcional
-            max_tokens: Máximo de tokens
-            temperature: Criatividade (0-2)
-            stream: Se deve usar streaming
-            
-        Returns:
-            Resultado da geração de texto
-        """
-        payload = {
-            "prompt": prompt,
-            "system_prompt": system_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": stream
-        }
-        
-        return self.invoke(
-            operation="chat",
-            model=model,
-            payload=payload
-        )
-
-    def health_check(self) -> Dict[str, Any]:
-        """
-        Verifica conectividade e saúde do broker.
-        
-        Returns:
-            Status de saúde do sistema
-        """
-        try:
-            response = self.client.get(f"{self.broker_url}/api/v1/health")
+            response = self.client.get(f"{self.broker_url}/health/")
             
             if response.status_code == 200:
                 return response.json()
             else:
-                return {
-                    "status": "error",
-                    "message": f"Status HTTP {response.status_code}",
-                    "details": response.text
-                }
+                return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
                 
         except httpx.RequestError as e:
-            return {
-                "status": "error", 
-                "message": "Connection failed",
-                "details": str(e)
-            }
-            
-    def add_custom_guardrail(self, name: str, rule: Dict[str, Any]) -> None:
-        """
-        Adiciona um guardrail personalizado (além dos defaults do projeto).
-        
-        IMPORTANTE: Guardrails e telemetria do projeto são obrigatórios e não podem
-        ser desabilitados. Este método ADICIONA validações personalizadas.
-        
-        Args:
-            name: Nome único do guardrail personalizado
-            rule: Configuração da regra personalizada
-            
-        Example:
-            client.add_custom_guardrail("content_length", {
-                "max_chars": 5000,
-                "check_encoding": "utf-8",
-                "forbidden_patterns": ["spam", "phishing"]
-            })
-        """
-        self.config.set_custom_guardrail(name, rule)
-        logger.debug(f"Guardrail personalizado '{name}' adicionado")
-    
-    def remove_custom_guardrail(self, name: str) -> bool:
-        """
-        Remove um guardrail personalizado.
-        
-        Args:
-            name: Nome do guardrail a remover
-            
-        Returns:
-            True se removido, False se não existia
-        """
-        removed = self.config.remove_custom_guardrail(name)
-        if removed:
-            logger.debug(f"Guardrail personalizado '{name}' removido")
-        return removed
-    
-    def list_custom_guardrails(self) -> Dict[str, Any]:
-        """
-        Lista todos os guardrails personalizados configurados.
-        
-        Returns:
-            Dicionário com os guardrails personalizados
-        """
-        return self.config.get_custom_guardrails()
-    
-    def get_telemetry_config(self) -> Dict[str, Any]:
-        """
-        Retorna configuração de telemetria local.
-        
-        Note: A telemetria do projeto é sempre ativa e obrigatória.
-        Esta é apenas a configuração adicional local.
-        """
-        return {
-            "local_enabled": self.config.local_telemetry_enabled,
-            "buffer_size": self.config.telemetry_buffer_size,
-            "environment": self.config.environment
-        }
+            error_msg = str(e).lower()
+            if "getaddrinfo failed" in error_msg or "connection" in error_msg:
+                raise BradaxConnectionError(f"Network connection error to broker: {str(e)}")
+            elif "timeout" in error_msg:
+                raise BradaxConnectionError(f"Network timeout error to broker: {str(e)}")
+            else:
+                raise BradaxConnectionError(f"Network error accessing broker: {str(e)}")
     
     def validate_content(self, content: str) -> Dict[str, Any]:
         """
@@ -878,24 +608,6 @@ class BradaxClient:
             "content_length": len(content)
         }
     
-    def send_llm_request(self, prompt: str, model: str = None, **kwargs) -> Dict[str, Any]:
-        """
-        Alias para run_llm() - envia requisição LLM para o broker.
-        
-        Args:
-            prompt: Prompt para o modelo
-            model: Nome do modelo (opcional)
-            **kwargs: Argumentos adicionais (max_tokens, temperature, etc.)
-            
-        Returns:
-            Resposta do modelo LLM
-        """
-        return self.run_llm(
-            prompt=prompt,
-            model=model or "gpt-4.1-nano",
-            **kwargs
-        )
-    
     def record_telemetry_event(self, event_data: Dict[str, Any]) -> bool:
         """
         Registra evento de telemetria no broker.
@@ -931,20 +643,6 @@ class BradaxClient:
         except httpx.RequestError as e:
             logger.warning(f"Erro ao registrar telemetria: {e}")
             return False
-            
-    def disable_telemetry(self) -> None:
-        """
-        Desabilita telemetria local (a telemetria do projeto permanece ativa).
-        """
-        self.config.local_telemetry_enabled = False
-        logger.info("Telemetria local desabilitada")
-    
-    def disable_guardrails(self) -> None:
-        """
-        Remove guardrails personalizados (guardrails do projeto permanecem ativos).
-        """
-        self.config.custom_guardrails.clear()
-        logger.info("Guardrails personalizados removidos")
     
     def get_local_telemetry(self) -> Dict[str, Any]:
         """
@@ -960,33 +658,6 @@ class BradaxClient:
             "last_operation": datetime.now().isoformat(),
             "buffer_size": self.config.telemetry_buffer_size
         }
-    
-    def check_broker_health(self) -> Dict[str, Any]:
-        """
-        Verifica saúde do broker.
-        
-        Returns:
-            Status de saúde do broker
-            
-        Raises:
-            BradaxConnectionError: Se não conseguir conectar ao broker
-        """
-        try:
-            response = self.client.get(f"{self.broker_url}/health/")
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
-                
-        except httpx.RequestError as e:
-            error_msg = str(e).lower()
-            if "getaddrinfo failed" in error_msg or "connection" in error_msg:
-                raise BradaxConnectionError(f"Network connection error to broker: {str(e)}")
-            elif "timeout" in error_msg:
-                raise BradaxConnectionError(f"Network timeout error to broker: {str(e)}")
-            else:
-                raise BradaxConnectionError(f"Network error accessing broker: {str(e)}")
     
     def add_custom_guardrail_rule(self, rule: Dict[str, Any]) -> None:
         """
@@ -1047,7 +718,6 @@ class BradaxClient:
             temperature=temperature,
             **kwargs
         )
-            
             
     def close(self) -> None:
         """Fecha o cliente HTTP e libera recursos"""

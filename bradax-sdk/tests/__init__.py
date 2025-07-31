@@ -1,1 +1,0 @@
-# bradax-sdk tests

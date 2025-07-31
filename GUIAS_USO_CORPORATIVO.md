@@ -13,28 +13,29 @@ from bradax import BradaxClient
 from bradax.config import BradaxSDKConfig
 
 # Configuração específica do marketing
-config = BradaxSDKConfig.from_environment()
-config.set_custom_guardrail("marketing_compliance", {
-    "forbidden_claims": ["100% garantido", "melhor do mundo"],
-    "require_disclaimers": True,
-    "max_campaign_length": 2000,
-    "approved_tone": ["profissional", "amigável"]
-})
-
-config.set_custom_guardrail("brand_guidelines", {
-    "company_name": "ACME Corp",
-    "approved_terms": ["inovação", "qualidade", "excelência"],
-    "forbidden_terms": ["concorrente", "barato"],
-    "require_brand_mention": True
-})
-
-# Cliente para marketing
-marketing_client = BradaxClient(
-    project_token="proj_acme_2025_marketing_campaigns_001",
-    config=config
+config = BradaxSDKConfig.for_integration_tests(
+    broker_url="https://llm.empresa.com",
+    project_id="acme_marketing_campaigns",
+    api_key="marketing_api_key"
 )
 
-# Geração de conteúdo para campanha
+# Adicionar guardrails personalizados
+marketing_client = BradaxClient(config)
+
+# Adicionar regras de compliance
+marketing_client.add_custom_guardrail_rule({
+    "id": "marketing_compliance",
+    "pattern": "100% garantido|melhor do mundo",
+    "severity": "HIGH"
+})
+
+marketing_client.add_custom_guardrail_rule({
+    "id": "brand_guidelines", 
+    "pattern": "concorrente|barato",
+    "severity": "MEDIUM"
+})
+
+# Geração de conteúdo para campanha usando LangChain
 def create_campaign_content(product: str, target_audience: str) -> dict:
     prompt = f"""
     Crie um texto de campanha para o produto {product}.
@@ -48,19 +49,24 @@ def create_campaign_content(product: str, target_audience: str) -> dict:
     - Máximo 500 palavras
     """
     
+    # Uso do método invoke() LangChain-compatible
+    response = marketing_client.invoke(prompt)
+    return response
+    
     try:
-        response = marketing_client.run_llm(
-            prompt=prompt,
-            model="gpt-4o-mini",
-            max_tokens=800,
-            temperature=0.8  # Mais criativo para marketing
+        # Usar invoke() com configuração adequada para marketing
+        response = marketing_client.invoke(
+            prompt,
+            config={"model": "gpt-4o-mini", "temperature": 0.8},  # Mais criativo para marketing
+            max_tokens=800
         )
         
         return {
             "content": response["content"],
             "word_count": len(response["content"].split()),
             "compliance_check": "passed",
-            "cost": response.get("usage", {}).get("total_tokens", 0) * 0.00015
+            "model_used": response["response_metadata"]["model"],
+            "request_id": response["response_metadata"]["request_id"]
         }
         
     except Exception as e:
@@ -91,53 +97,59 @@ Departamento Jurídico precisa analisar contratos e documentos com máxima segur
 ### Implementação
 ```python
 # Configuração jurídica (máxima segurança)
-legal_config = BradaxSDKConfig.from_environment()
-legal_config.set_custom_guardrail("legal_confidentiality", {
-    "classification_required": True,
-    "pii_protection": "maximum",
-    "encryption_required": True,
-    "audit_trail": "complete"
-})
-
-legal_config.set_custom_guardrail("document_validation", {
-    "max_pages": 100,
-    "allowed_formats": ["pdf", "docx", "txt"],
-    "require_metadata": True,
-    "watermark_detection": True
-})
-
-legal_client = BradaxClient(
-    project_token="proj_acme_2025_legal_analysis_001", 
-    config=legal_config
+config = BradaxSDKConfig.for_integration_tests(
+    broker_url="https://llm.empresa.com",
+    project_id="acme_legal_analysis",
+    api_key="legal_api_key",
+    timeout=60  # Timeout maior para análises complexas
 )
 
-# Análise de contrato
+legal_client = BradaxClient(config)
+
+# Guardrails específicos para área jurídica
+legal_client.add_custom_guardrail_rule({
+    "id": "legal_confidentiality",
+    "pattern": "cpf|cnpj|rg|cartão|conta bancária",
+    "severity": "CRITICAL"
+})
+
+legal_client.add_custom_guardrail_rule({
+    "id": "document_validation",
+    "pattern": "^.{0,100}$",  # Documentos muito curtos
+    "severity": "MEDIUM"
+})
+
+# Análise de contrato usando LangChain
 def analyze_contract(contract_text: str, analysis_type: str) -> dict:
-    system_prompt = """
-    Você é um assistente jurídico especializado. 
-    Analise apenas os aspectos solicitados.
-    Mantenha confidencialidade absoluta.
-    Não armazene informações sensíveis.
-    """
+    messages = [
+        {
+            "role": "system", 
+            "content": """Você é um assistente jurídico especializado. 
+            Analise apenas os aspectos solicitados.
+            Mantenha confidencialidade absoluta.
+            Não armazene informações sensíveis."""
+        },
+        {
+            "role": "user",
+            "content": f"""
+            Tipo de análise: {analysis_type}
+            
+            Analise este contrato focando em:
+            - Cláusulas de risco
+            - Prazos e vencimentos  
+            - Obrigações das partes
+            - Pontos de atenção
+            
+            Contrato: {contract_text}
+            """
+        }
+    ]
     
-    prompt = f"""
-    Tipo de análise: {analysis_type}
-    
-    Por favor, analise este contrato focando em:
-    - Cláusulas de risco
-    - Prazos e vencimentos  
-    - Obrigações das partes
-    - Pontos de atenção
-    
-    Contrato: {contract_text}
-    """
-    
-    response = legal_client.run_llm(
-        prompt=prompt,
-        system_message=system_prompt,
-        model="gpt-4o",  # Modelo premium para análise jurídica
-        max_tokens=2000,
-        temperature=0.1  # Máxima precisão
+    # Usar invoke() com configuração para análise jurídica
+    response = legal_client.invoke(
+        messages,
+        config={"model": "gpt-4o", "temperature": 0.1},  # Máxima precisão
+        max_tokens=2000
     )
     
     return {

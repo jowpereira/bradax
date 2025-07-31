@@ -5,7 +5,6 @@ Middleware para controle de taxa de requisições com constantes internas.
 """
 
 import time
-import os
 from typing import Dict, Callable
 from fastapi import Request, Response, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -60,18 +59,13 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         # Obter IP do cliente
         client_ip = self._get_client_ip(request)
         
-        # Verificar se está em modo de teste (desabilitar rate limiting)
-        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING", "false").lower() == "true":
-            # Pular rate limiting durante os testes
-            pass
-        else:
-            # Verificar rate limit (sempre ativo para produção)
-            if not self._check_rate_limit(client_ip):
-                raise HTTPException(
-                    status_code=429,
-                    detail="Rate limit exceeded. Too many requests.",
-                    headers={"Retry-After": str(SecurityConstants.RATE_LIMIT_WINDOW_SECONDS)}
-                )
+        # Verificar rate limit (sempre ativo para produção)
+        if not self._check_rate_limit(client_ip):
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Too many requests.",
+                headers={"Retry-After": str(SecurityConstants.RATE_LIMIT_WINDOW_SECONDS)}
+            )
         
         # Processar requisição
         response = await call_next(request)

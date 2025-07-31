@@ -1,14 +1,14 @@
-# Bradax Broker - Hub Corporativo de LLM
+# Bradax Broker - Hub Corporativo LangChain
 
-> **Sistema empresarial de orquestração de LLM com autenticação por projeto, guardrails automáticos e telemetria completa.**
+> **Broker empresarial para SDK LangChain com autenticação por projeto, guardrails automáticos e telemetria integrada.**
 
 ## 🏗️ Visão Geral Arquitetural
 
-O Bradax Broker é um proxy corporativo que centraliza o acesso a modelos de LLM, aplicando políticas de governança, autenticação baseada em projetos e coleta de telemetria em tempo real.
+O Bradax Broker é um proxy corporativo que centraliza o acesso a modelos LLM através de interface LangChain, aplicando políticas de governança, autenticação baseada em projetos e coleta de telemetria em tempo real.
 
 ```mermaid
 graph TB
-    SDK[bradax SDK] -->|Token de Projeto| AUTH[Autenticação]
+    SDK[Bradax SDK - Interface LangChain] -->|invoke/ainvoke| AUTH[Autenticação]
     AUTH --> GUARD[Guardrails]
     GUARD --> LLM[Serviço LLM]
     LLM --> PROVIDER[Provider LangChain]
@@ -29,22 +29,21 @@ graph TB
 
 ## 🎯 Casos de Uso Corporativos
 
-### 1. Integração por Projetos
+### 1. Interface LangChain Padronizada
 ```python
-# SDK se autentica com token do projeto
-client = BradaxClient(
-    project_token="proj_acme_2025_ai_assistant_001",
-    broker_url="https://llm.empresa.com"
+# SDK LangChain-compatível se autentica com broker
+config = BradaxSDKConfig.for_development(
+    broker_url="http://localhost:8000",
+    project_id="acme-ai-assistant"
 )
+client = BradaxClient(config)
 
-# Cada projeto tem seus modelos permitidos
-response = client.run_llm(
-    prompt="Analise este documento corporativo...",
-    model="gpt-4o-mini"  # Deve estar na lista do projeto
-)
+# Interface LangChain padrão
+response = client.invoke("Analise este documento corporativo...")
+print(response["content"])
 ```
 
-### 2. Guardrails Automáticos
+### 2. Guardrails Automáticos por Projeto
 ```python
 # Política aplicada automaticamente por projeto
 {
@@ -79,7 +78,22 @@ Authorization: Bearer proj_token_here
 
 ### Operações LLM
 ```http
-# Execução de modelo
+# Execução de modelo - Formato LangChain (padrão)
+POST /api/v1/llm/invoke
+{
+    "operation": "chat",
+    "model": "gpt-4o-mini", 
+    "payload": {
+        "messages": [
+            {"role": "user", "content": "Sua pergunta aqui"}
+        ],
+        "max_tokens": 1000,
+        "temperature": 0.7
+    },
+    "project_id": "acme_ai_assistant"
+}
+
+# Também suporta formato legado (compatibilidade)
 POST /api/v1/llm/invoke
 {
     "operation": "chat",
@@ -259,25 +273,48 @@ GET /health
 }
 ```
 
-## 🚀 Casos de Uso Avançados
+## 🚀 Integração SDK-Broker
 
-### 1. Batch Processing
+### 1. Configuração e Uso Básico
 ```python
-# Processar múltiplos documentos
-results = client.batch_process([
-    {"prompt": "Analise documento 1", "model": "gpt-4o-mini"},
-    {"prompt": "Analise documento 2", "model": "gpt-4o-mini"},
-    {"prompt": "Analise documento 3", "model": "gpt-4o-mini"}
-])
+from bradax import BradaxClient
+from bradax.config import BradaxSDKConfig
+
+# Configuração para o broker
+config = BradaxSDKConfig.for_integration_tests(
+    broker_url="https://llm.empresa.com",
+    project_id="acme_ai_assistant",
+    api_key="your_api_key"
+)
+
+client = BradaxClient(config)
+
+# Uso LangChain-compatible
+response = client.invoke("Analise este documento...")
+print(response["content"])
 ```
 
-### 2. Streaming Responses
+### 2. Processamento com Mensagens Estruturadas  
 ```python
-# Resposta em tempo real
-for chunk in client.stream_llm(
-    prompt="Escreva um relatório detalhado...",
-    model="gpt-4o"
-):
+# Formato LangChain com roles
+messages = [
+    {"role": "system", "content": "Você é um assistente especializado"},
+    {"role": "user", "content": "Resuma este relatório"}
+]
+
+response = client.invoke(messages, config={"model": "gpt-4o"})
+```
+
+### 3. Processamento Assíncrono
+```python
+# Uso assíncrono para operações longas
+async def process_document(text):
+    response = await client.ainvoke(
+        f"Analise este documento: {text}",
+        config={"temperature": 0.1}
+    )
+    return response["content"]
+```
     print(chunk, end="")
 ```
 
