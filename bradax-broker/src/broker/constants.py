@@ -158,25 +158,3 @@ def get_model_limits(model: str) -> Dict[str, Any]:
         'max_tokens': HubLLMConstants.DEFAULT_MAX_TOKENS,
         'cost_per_1k': 0.0
     })
-
-
-class HubStorageConstants:
-    """Constantes para armazenamento de dados do Hub"""
-    
-    # Diretórios
-    DATA_DIR = "data"
-    
-    # Arquivos de dados
-    PROJECTS_FILE = "projects.json"
-    TELEMETRY_FILE = "telemetry.json"
-    GUARDRAILS_FILE = "guardrails.json"
-    SYSTEM_INFO_FILE = "system_info.json"
-
-
-def get_hub_environment() -> BradaxEnvironment:
-    """Retorna ambiente atual do Hub"""
-    env = os.getenv('BRADAX_ENVIRONMENT', 'development')
-    try:
-        return BradaxEnvironment(env)
-    except ValueError:
-        return BradaxEnvironment.DEVELOPMENT

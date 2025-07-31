@@ -8,10 +8,6 @@ configuração flexível via environment variables.
 import os
 from typing import Dict, Any, List
 from pydantic import BaseModel, field_validator
-from dotenv import load_dotenv
-
-# Carregar .env na inicialização
-load_dotenv()
 
 # Usar constants internas do Hub
 from .constants import (
@@ -65,9 +61,6 @@ class Settings(BaseModel):
     supported_models: List[str] = HubLLMConstants.SUPPORTED_MODELS
     default_model: str = HubLLMConstants.DEFAULT_MODEL
     default_max_tokens: int = HubLLMConstants.DEFAULT_MAX_TOKENS
-    
-    # OpenAI Configuration
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     
     # Orçamento
     default_budget: float = None

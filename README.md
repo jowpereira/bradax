@@ -1,52 +1,63 @@
-# 🚀 Bradax - AI Hub & SDK Empresarial
+# 🚀 Bradax - Interface LangChain Corporativa
 
-Sistema empresarial de IA de classe enterprise com arquitetura MVC completa, sistema robusto de exceções e zero hardcode.
+Sistema empresarial de IA com interface **100% compatível LangChain** para produtividade máxima.
 
-## 📦 Arquitetura Empresarial
+## 📦 Componentes do Sistema
 
-### 🔹 **bradax-sdk**
-SDK Python para integração com o Hub de IA da empresa.
-- **Destino**: Nexus da empresa para download pelos desenvolvedores
-- **Propósito**: Interface padronizada para consumo de IA
-- **Características**: Autossuficiente, zero hard-code, configurável via environment
+### 🔹 **bradax-sdk** - Interface LangChain
+SDK Python com interface padrão LangChain para integração corporativa.
+- **Interface**: `invoke()` e `ainvoke()` - compatível 100% LangChain
+- **Configuração**: Factory methods por ambiente (`for_development`, `for_production`)
+- **Governança**: Guardrails e telemetria integrados
+- **Deploy**: Via Nexus da empresa para desenvolvedores
 
-### 🔹 **bradax-broker** ⭐ 
-API/Hub central de validação e processamento de IA com arquitetura MVC completa.
-- **Destino**: Deploy em produção como serviço
-- **Propósito**: Validação, autenticação, rate limiting e processamento
-- **Características**: Escalável, configurável, com observabilidade completa
-- **Arquitetura**: MVC Controllers + Sistema robusto de exceções + Zero hardcode
+### 🔹 **bradax-broker** - Hub de IA ⭐ 
+API central de processamento com arquitetura MVC empresarial.
+- **Função**: Validação, autenticação, rate limiting e processamento
+- **Arquitetura**: MVC Controllers + Sistema robusto de exceções
+- **Deploy**: Produção como serviço escalável
+- **Observabilidade**: Telemetria e auditoria completas
 
 ## 🛠️ Estrutura Enterprise
 
 ```
 bradax/
-├── bradax-sdk/          # 📚 SDK para desenvolvedores
+├── bradax-sdk/          # 📚 Interface LangChain para desenvolvedores
 │   └── src/bradax/
-│       ├── constants.py      # Configurações internas
-│       ├── config/           # Sistema de configuração
+│       ├── client.py         # BradaxClient com invoke() e ainvoke()
+│       ├── config/           # Factory methods por ambiente
 │       ├── exceptions/       # Hierarquia de exceções
-│       └── client/           # Clientes de integração
+│       └── constants.py      # Configurações internas
 │
 └── bradax-broker/       # 🚀 Hub/API de IA Enterprise
     └── src/broker/
-        ├── constants.py      # ✅ ZERO HARDCODE - Configurações via env vars
-        ├── exceptions/       # ✅ Sistema robusto de exceções hierárquicas
-        ├── controllers/      # ✅ MVC Controllers (Base, LLM, Project, System)
-        ├── api/              # Endpoints da API
-        ├── auth/             # ✅ Autenticação empresarial (ProjectAuth)
-        ├── middleware/       # Middlewares (CORS, rate limiting, security)
-        ├── schemas/          # Modelos Pydantic
-        └── services/         # Lógica de negócio
+        ├── main.py           # FastAPI app principal
+        ├── controllers/      # MVC Controllers (Base, LLM, Project, System)
+        ├── middleware/       # CORS, rate limiting, security
+        ├── services/         # Lógica de negócio (OpenAI, LangChain)
+        └── auth/             # Autenticação empresarial
 ```
 
-## ✨ Características Enterprise
+## ✨ Interface LangChain Moderna
 
-### 🎯 **ZERO HARDCODE ✅**
-- Todas as configurações via environment variables
-- Constants centralizadas por domínio (Network, Security, LLM, Budget)
-- Configuração específica por ambiente (dev/testing/staging/prod)
-- Sistema de fallback eliminado
+### 🎯 **SDK com Padrão LangChain ✅**
+```python
+from bradax import BradaxClient
+from bradax.config import BradaxSDKConfig
+
+# Configuração para desenvolvimento
+config = BradaxSDKConfig.for_development()
+client = BradaxClient(config)
+
+# Interface LangChain padrão
+response = client.invoke("Analise este documento")
+response = await client.ainvoke("Gere relatório")
+```
+
+### 🏗️ **Configurações por Ambiente ✅**
+- `for_development()` - Desenvolvimento local
+- `for_production()` - Deploy automático (não testes manuais)
+- Testes em homologação/produção via esteira de deploy
 
 ### 🏗️ **Arquitetura MVC Completa ✅**
 - **BaseController**: Estrutura comum com logging e validação
@@ -116,17 +127,25 @@ BRADAX_RATE_LIMIT_RPM=60
 
 ### SDK (Desenvolvedores)
 ```python
-from bradax import BradaxCorporateClient
+from bradax import BradaxClient
+from bradax.config import BradaxSDKConfig
 
-# Inicialização
-client = BradaxCorporateClient(
+# Configuração
+config = BradaxSDKConfig.for_integration_tests(
+    broker_url="https://api.bradax.com",
     project_id="proj_meu_projeto",
     api_key="bradax_key_123..."
 )
 
-# Uso
-response = await client.chat_completion([
-    {"role": "user", "content": "Analise este documento..."}
+# Inicialização
+client = BradaxClient(config)
+
+# Uso LangChain-compatible
+response = client.invoke("Analise este documento...")
+
+# Uso assíncrono
+response = await client.ainvoke([
+    {"role": "user", "content": "Resuma este relatório..."}
 ])
 ```
 
