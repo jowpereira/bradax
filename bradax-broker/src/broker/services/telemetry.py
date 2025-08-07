@@ -80,9 +80,8 @@ class TelemetryCollector:
         # Garantir diretório existe
         self.storage_path.mkdir(exist_ok=True)
         
-        # Cache em memória para performance
+        # Cache em memória para performance (flush imediato para gravação em tempo real)
         self._events_cache: List[TelemetryEvent] = []
-        self._cache_size_limit = 100
         
         logger.info(f"TelemetryCollector iniciado - ambiente: {self.environment.value}")
     
@@ -292,12 +291,10 @@ class TelemetryCollector:
         logger.info(f"Auth registrada: {project_id} -> {'SUCCESS' if success else 'FAILED'}")
     
     def _add_event(self, event: TelemetryEvent) -> None:
-        """Adiciona evento ao cache e persiste se necessário"""
+        """Adiciona evento e persiste imediatamente."""
         self._events_cache.append(event)
-        
-        # Flush cache se atingiu limite
-        if len(self._events_cache) >= self._cache_size_limit:
-            self._flush_cache()
+        # Gravação imediata para evitar perda de dados caso o processo finalize
+        self._flush_cache()
     
     def _flush_cache(self) -> None:
         """Persiste cache de eventos em disco"""
