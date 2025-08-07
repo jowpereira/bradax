@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException
 import logging
 
+from broker.services.llm.service import GuardrailViolationError
+
 
 class BaseController(ABC):
     """
@@ -49,7 +51,9 @@ class BaseController(ABC):
         })
         
         # Mapear tipos de erro para códigos HTTP
-        if isinstance(error, ValueError):
+        if isinstance(error, GuardrailViolationError):
+            return HTTPException(status_code=403, detail=str(error))
+        elif isinstance(error, ValueError):
             return HTTPException(status_code=400, detail=str(error))
         elif isinstance(error, KeyError):
             return HTTPException(status_code=404, detail=f"Resource not found: {str(error)}")

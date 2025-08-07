@@ -511,6 +511,7 @@ TechnicalException = BradaxTechnicalException
 ExternalAPIException = BradaxExternalAPIException
 ConfigurationException = BradaxConfigurationException
 DataAccessException = BradaxDataAccessException
+StorageException = BradaxDataAccessException  # Alias específico para storage
 NetworkException = BradaxNetworkException
 TimeoutException = BradaxTimeoutException
 RateLimitException = BradaxRateLimitException
@@ -548,6 +549,7 @@ __all__ = [
     'ExternalAPIException',
     'ConfigurationException',
     'DataAccessException',
+    'StorageException',  # Alias para DataAccessException
     'NetworkException',
     'TimeoutException',
     'RateLimitException',

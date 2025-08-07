@@ -293,7 +293,8 @@ class LLMController(ServiceController):
         model_id: str,
         payload: Dict[str, Any],
         project_id: Optional[str] = None,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
+        custom_guardrails: Optional[Dict[str, Any]] = None  # CORREÇÃO: Aceitar guardrails customizados
     ) -> Dict[str, Any]:
         """
         Invocação central para wrapper LangChain
@@ -325,7 +326,8 @@ class LLMController(ServiceController):
                 model_id=model_id,
                 payload=payload,
                 project_id=project_id,
-                request_id=request_id
+                request_id=request_id,
+                custom_guardrails=custom_guardrails  # CORREÇÃO: Passar guardrails customizados
             )
             
             self._log_response("invoke", True, {"request_id": result.get("request_id")})

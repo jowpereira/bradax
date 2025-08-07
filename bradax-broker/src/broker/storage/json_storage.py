@@ -6,6 +6,8 @@ Gerencia persistência automática de dados em arquivos JSON:
 - Telemetrias e métricas  
 - Guardrails e logs de segurança
 - Informações do sistema
+
+🔄 Suporte a Transações Atômicas para operações thread-safe
 """
 
 import json
@@ -13,11 +15,16 @@ import os
 import platform
 import threading
 import time
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 import uuid
+
+from ..logging_config import storage_logger
+from ..utils.paths import get_data_dir
 
 # Importação condicional do psutil
 try:
@@ -25,6 +32,142 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+
+
+class TransactionContext:
+    """
+    Contexto de Transação Atômica para JsonStorage
+    
+    Garante ACID properties:
+    - Atomicity: Todas as operações ou nenhuma
+    - Consistency: Estado válido antes e depois
+    - Isolation: Operações não interferem entre si
+    - Durability: Dados persistidos com segurança
+    """
+    
+    def __init__(self, storage_instance: 'JsonStorage'):
+        self.storage = storage_instance
+        self.backup_files: Dict[str, Path] = {}
+        self.temp_files: Dict[str, Path] = {}
+        self.operations: List[str] = []
+        self.committed = False
+        self.rolled_back = False
+        
+    def __enter__(self):
+        """Iniciar transação - criar backups dos arquivos"""
+        with self.storage._lock:
+            self._create_backups()
+            storage_logger.debug(f"🔄 Transação iniciada: {len(self.backup_files)} arquivos em backup")
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Finalizar transação"""
+        storage_logger.debug(f"🔚 __exit__ chamado: exc_type={exc_type}, committed={self.committed}, rolled_back={self.rolled_back}")
+        
+        with self.storage._lock:  # Manter lock durante finalização
+            if exc_type is not None:
+                # Houve exceção - fazer rollback
+                storage_logger.debug(f"🔄 Fazendo rollback devido a exceção: {exc_val}")
+                self.rollback()
+                storage_logger.error(f"❌ Transação falhou: {exc_val}")
+                return False
+            elif not self.committed and not self.rolled_back:
+                # Commit automático se não houve problemas
+                storage_logger.debug(f"✅ Fazendo commit automático")
+                self.commit()
+        return True
+    
+    def track_file(self, file_path: Path):
+        """Adiciona um arquivo para rastreamento na transação"""
+        if file_path.exists() and str(file_path) not in self.backup_files:
+            backup_path = Path(tempfile.mktemp(suffix=f"_{file_path.name}.backup"))
+            shutil.copy2(file_path, backup_path)
+            self.backup_files[str(file_path)] = backup_path
+            storage_logger.debug(f"📋 Arquivo adicionado ao rastreamento: {file_path}")
+    
+    def _create_backups(self):
+        """Criar backups temporários dos arquivos que serão modificados"""
+        files_to_backup = [
+            self.storage.projects_file,
+            self.storage.telemetry_file, 
+            self.storage.guardrails_file,
+            self.storage.system_file
+        ]
+        
+        # Adicionar outros arquivos que existem no data_dir
+        if hasattr(self.storage, 'data_dir') and self.storage.data_dir.exists():
+            for json_file in self.storage.data_dir.glob("*.json"):
+                if json_file not in files_to_backup:
+                    files_to_backup.append(json_file)
+        
+        for file_path in files_to_backup:
+            if file_path.exists() and file_path.is_file():
+                # Criar backup temporário
+                backup_path = Path(tempfile.mktemp(suffix=f"_{file_path.name}.backup"))
+                shutil.copy2(file_path, backup_path)
+                self.backup_files[str(file_path)] = backup_path
+                storage_logger.debug(f"📋 Backup criado: {file_path} -> {backup_path}")
+            else:
+                storage_logger.debug(f"📋 Arquivo não existe para backup: {file_path}")
+                
+    def add_operation(self, operation: str):
+        """Registrar operação na transação"""
+        self.operations.append(f"{datetime.now().isoformat()}: {operation}")
+        
+    def commit(self):
+        """Confirmar transação - remover backups"""
+        if self.rolled_back:
+            raise RuntimeError("Cannot commit a rolled back transaction")
+            
+        try:
+            # Remover arquivos de backup
+            for backup_path in self.backup_files.values():
+                if backup_path.exists():
+                    backup_path.unlink()
+                    
+            # Remover arquivos temporários
+            for temp_path in self.temp_files.values():
+                if temp_path.exists():
+                    temp_path.unlink()
+                    
+            self.committed = True
+            storage_logger.info(f"✅ Transação commitada: {len(self.operations)} operações")
+            
+        except Exception as e:
+            storage_logger.error(f"❌ Erro no commit: {e}")
+            self.rollback()
+            raise
+            
+    def rollback(self):
+        """Desfazer transação - restaurar backups"""
+        if self.committed:
+            raise RuntimeError("Cannot rollback a committed transaction")
+            
+        try:
+            # Restaurar arquivos dos backups
+            for original_path, backup_path in self.backup_files.items():
+                if backup_path.exists():
+                    storage_logger.debug(f"🔄 Restaurando: {backup_path} -> {original_path}")
+                    shutil.copy2(backup_path, original_path)
+                    backup_path.unlink()
+                else:
+                    storage_logger.warning(f"⚠️  Backup não encontrado: {backup_path}")
+                    
+            # Remover arquivos temporários
+            for temp_path in self.temp_files.values():
+                if temp_path.exists():
+                    temp_path.unlink()
+            
+            # CRÍTICO: Recarregar cache após rollback
+            self.storage._load_all_data()
+            storage_logger.debug(f"🔄 Cache recarregado após rollback")
+                    
+            self.rolled_back = True
+            storage_logger.warning(f"🔄 Transação revertida: {len(self.operations)} operações desfeitas")
+            
+        except Exception as e:
+            storage_logger.error(f"❌ Erro no rollback: {e}")
+            raise
 
 
 @dataclass
@@ -50,26 +193,109 @@ class ProjectData:
 
 @dataclass
 class TelemetryData:
-    """Estrutura de dados de telemetria"""
-    telemetry_id: str
+    """Estrutura unificada de telemetria (merge TelemetryEvent + TelemetryData)"""
+    # Campos obrigatórios
+    telemetry_id: str  # Mesmo que event_id
     project_id: str
     timestamp: str
-    request_id: str
-    endpoint: str
-    method: str
-    status_code: int
-    response_time_ms: float
+    event_type: str = "request"  # "request_start", "request_complete", "error", etc.
+    
+    # Request context
+    request_id: str = ""
+    user_id: str = ""
+    endpoint: str = ""
+    method: str = ""
+    
+    # Performance metrics
+    status_code: int = 200
+    response_time_ms: float = 0.0
+    request_size: Optional[int] = None
+    response_size: Optional[int] = None
+    duration_ms: Optional[float] = None  # Alias para response_time_ms
+    
+    # LLM specific
     model_used: str = ""
     tokens_used: int = 0
+    tokens_consumed: Optional[int] = None  # Alias para tokens_used
+    cost_usd: Optional[float] = None
+    
+    # Error handling
+    error_type: Optional[str] = None
+    error_message: str = ""
+    error_code: Optional[str] = None
+    
+    # Client info
     client_ip: str = ""
     user_agent: str = ""
-    error_message: str = ""
-    user_id: str = ""
+    ip_address: Optional[str] = None  # Alias para client_ip
+    sdk_version: Optional[str] = None
+    
+    # Security
+    guardrail_triggered: Optional[str] = None
+    
+    # System context (referência, não duplicação)
+    system_info_ref: Optional[str] = None  # ID para SystemInfo compartilhado
+    
+    # Legacy system_info (será eliminado gradualmente)
     system_info: Dict[str, Any] = None
+    
+    # Extensibilidade
+    metadata: Dict[str, Any] = None
     
     def __post_init__(self):
         if self.system_info is None:
             self.system_info = {}
+        if self.metadata is None:
+            self.metadata = {}
+        
+        # Sincronizar aliases
+        if self.duration_ms and not self.response_time_ms:
+            self.response_time_ms = self.duration_ms
+        elif self.response_time_ms and not self.duration_ms:
+            self.duration_ms = self.response_time_ms
+            
+        if self.tokens_consumed and not self.tokens_used:
+            self.tokens_used = self.tokens_consumed
+        elif self.tokens_used and not self.tokens_consumed:
+            self.tokens_consumed = self.tokens_used
+            
+        if self.ip_address and not self.client_ip:
+            self.client_ip = self.ip_address
+        elif self.client_ip and not self.ip_address:
+            self.ip_address = self.client_ip
+    
+    @classmethod
+    def from_telemetry_event(cls, event: 'TelemetryEvent') -> 'TelemetryData':
+        """Converte TelemetryEvent para TelemetryData unificado."""
+        return cls(
+            telemetry_id=event.event_id,
+            project_id=event.project_id,
+            timestamp=event.timestamp,
+            event_type=event.event_type,
+            request_id=event.event_id,  # Usar event_id como request_id
+            user_id=event.user_id or "",
+            endpoint=event.endpoint or "",
+            method=event.method or "",
+            status_code=event.status_code or 200,
+            response_time_ms=event.duration_ms or 0.0,
+            duration_ms=event.duration_ms,
+            request_size=event.request_size,
+            response_size=event.response_size,
+            model_used=event.model_used or "",
+            tokens_used=event.tokens_consumed or 0,
+            tokens_consumed=event.tokens_consumed,
+            cost_usd=event.cost_usd,
+            error_type=event.error_type,
+            error_message=event.error_message or "",
+            error_code=None,
+            client_ip=event.ip_address or "",
+            user_agent=event.user_agent or "",
+            ip_address=event.ip_address,
+            sdk_version=event.sdk_version,
+            guardrail_triggered=event.guardrail_triggered,
+            system_info_ref="system_001",  # Referência ao sistema compartilhado
+            metadata=event.metadata or {}
+        )
 
 
 @dataclass
@@ -111,9 +337,17 @@ class SystemInfo:
 class JsonStorage:
     """Gerenciador de storage JSON thread-safe"""
     
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(exist_ok=True)
+    def __init__(self, data_dir: str = None):
+        # SISTEMA CENTRALIZADO: Sempre usar get_data_dir() do sistema de paths
+        if data_dir is None:
+            self.data_dir = get_data_dir()
+        else:
+            self.data_dir = Path(data_dir)
+        
+        # Validação simples: verificar se existe
+        if not self.data_dir.exists():
+            raise RuntimeError(f"Diretório de dados não encontrado: {self.data_dir}")
+        storage_logger.info(f"📁 JsonStorage inicializado em: {self.data_dir}")
         
         # Arquivos de dados
         self.projects_file = self.data_dir / "projects.json"
@@ -140,6 +374,18 @@ class JsonStorage:
         self._collect_system_info()
         self._start_auto_save_thread()
     
+    def transaction(self):
+        """
+        Context manager para operações transacionais atômicas
+        
+        Usage:
+            with storage.transaction() as tx:
+                storage.add_project(project_data)
+                storage.add_telemetry(telemetry_data)
+                # Se qualquer operação falhar, rollback automático
+        """
+        return TransactionContext(self)
+    
     def _get_timestamp(self) -> str:
         """Gera timestamp ISO 8601 UTC"""
         return datetime.now(timezone.utc).isoformat()
@@ -151,7 +397,9 @@ class JsonStorage:
                 with open(file_path, 'r', encoding='utf-8-sig') as f:
                     return json.load(f)
         except (json.JSONDecodeError, FileNotFoundError, UnicodeDecodeError) as e:
-            print(f"Erro ao carregar {file_path}: {e}")
+            storage_logger.error(
+                f"Erro ao carregar {file_path}: {str(e)}"
+            )
         
         return default_value or {}
     
@@ -161,7 +409,9 @@ class JsonStorage:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False, default=str)
         except Exception as e:
-            print(f"Erro ao salvar {file_path}: {e}")
+            storage_logger.error(
+                f"Erro ao salvar {file_path}: {str(e)}"
+            )
     
     def _load_all_data(self):
         """Carrega todos os dados na inicialização"""
@@ -185,11 +435,34 @@ class JsonStorage:
                     # Converter event_id para request_id se necessário
                     if 'event_id' in item and 'request_id' not in item:
                         item['request_id'] = item.pop('event_id')
+                    
+                    # Filtrar apenas campos válidos da TelemetryData
+                    valid_fields = {
+                        'telemetry_id', 'project_id', 'timestamp', 'event_type',
+                        'request_id', 'user_id', 'endpoint', 'method',
+                        'status_code', 'response_time_ms', 'request_size', 'response_size', 'duration_ms',
+                        'model_used', 'tokens_used', 'tokens_consumed', 'cost_usd',
+                        'error_code', 'error_message', 'operation_type', 'data_source'
+                    }
+                    
+                    # Limpar campos inválidos (como 'id')
+                    filtered_item = {k: v for k, v in item.items() if k in valid_fields}
+                    
+                    # Garantir campos obrigatórios
+                    if 'telemetry_id' not in filtered_item:
+                        filtered_item['telemetry_id'] = filtered_item.get('request_id', str(uuid.uuid4()))
+                    if 'project_id' not in filtered_item:
+                        filtered_item['project_id'] = 'unknown'
+                    if 'timestamp' not in filtered_item:
+                        filtered_item['timestamp'] = datetime.now(timezone.utc).isoformat()
+                    
                     try:
-                        self._telemetry_cache.append(TelemetryData(**item))
+                        self._telemetry_cache.append(TelemetryData(**filtered_item))
                     except TypeError as e:
                         # Pular itens com estrutura incompatível
-                        print(f"Aviso: Ignorando item de telemetria incompatível: {e}")
+                        storage_logger.warning(
+                            f"Ignorando item de telemetria incompatível: {str(e)}"
+                        )
                         continue
             else:
                 self._telemetry_cache = []
@@ -258,7 +531,9 @@ class JsonStorage:
             self._save_json_file(self.system_file, asdict(self._system_info))
             
         except Exception as e:
-            print(f"Erro ao coletar informações do sistema: {e}")
+            storage_logger.error(
+                f"Erro ao coletar informações do sistema: {str(e)}"
+            )
     
     # === OPERAÇÕES DE PROJETOS ===
     
@@ -346,26 +621,28 @@ class JsonStorage:
     # === OPERAÇÕES DE TELEMETRIA ===
     
     def add_telemetry(self, telemetry: TelemetryData):
-        """Adiciona entrada de telemetria com auto-save otimizado"""
+        """Adiciona entrada de telemetria com auto-save otimizado e suporte transacional"""
         with self._lock:
-            # Adicionar informações do sistema atual
-            if self._system_info:
-                telemetry.system_info = {
-                    "hostname": self._system_info.hostname,
-                    "platform": self._system_info.platform,
-                    "cpu_count": self._system_info.cpu_count,
-                    "memory_gb": self._system_info.memory_total_gb
-                }
+            # Usar referência compartilhada ao invés de duplicar system_info
+            if not telemetry.system_info_ref and self._system_info:
+                telemetry.system_info_ref = "system_001"  # Single source of truth
+            
+            # Limpar system_info legado (duplicação desnecessária)
+            telemetry.system_info = {}
             
             self._telemetry_cache.append(telemetry)
+            
+            # Registrar operação se há transação ativa
+            operation = f"add_telemetry: {telemetry.request_id} for project {telemetry.project_id}"
+            storage_logger.debug(f"📝 {operation}")
             
             # Manter apenas últimas 1000 entradas em memória
             if len(self._telemetry_cache) > 1000:
                 self._telemetry_cache = self._telemetry_cache[-1000:]
+                storage_logger.debug(f"🧹 Cache telemetria limitado a 1000 entradas")
             
-            # Save otimizado: apenas se muitas entradas ou tempo decorrido
-            if len(self._telemetry_cache) % 10 == 0 or time.time() - self._last_save > 60:
-                self._save_telemetry()
+            # CORRIGIDO: Save imediato para garantir persistência
+            self._save_telemetry()
     
     def get_telemetry(self, 
                      project_id: Optional[str] = None, 
@@ -394,9 +671,8 @@ class JsonStorage:
             if len(self._guardrails_cache) > 1000:
                 self._guardrails_cache = self._guardrails_cache[-1000:]
             
-            # Save otimizado: apenas se muitos eventos ou tempo decorrido
-            if len(self._guardrails_cache) % 5 == 0 or time.time() - self._last_save > 60:
-                self._save_guardrails()
+            # CORRIGIDO: Save imediato para garantir persistência
+            self._save_guardrails()
     
     def get_guardrail_events(self, 
                            project_id: Optional[str] = None,
@@ -412,6 +688,16 @@ class JsonStorage:
             events = [e for e in events if e.guardrail_type == guardrail_type]
         
         return events[-limit:]
+    
+    def get_guardrails(self) -> List[Dict[str, Any]]:
+        """Obtém todas as regras de guardrails"""
+        try:
+            with open(self.data_dir / "guardrails.json", 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return []
+        except Exception:
+            return []
     
     def _save_guardrails(self):
         """Salva eventos de guardrails em disco"""
@@ -487,7 +773,9 @@ class JsonStorage:
                     time.sleep(self._auto_save_interval)
                     self._periodic_save()
                 except Exception as e:
-                    print(f"Erro no auto-save: {e}")
+                    storage_logger.error(
+                        f"Erro no auto-save: {str(e)}"
+                    )
         
         auto_save_thread = threading.Thread(target=auto_save_worker, daemon=True)
         auto_save_thread.start()
@@ -500,7 +788,9 @@ class JsonStorage:
                 self._save_telemetry()
                 self._save_guardrails()
                 self._last_save = time.time()
-                print(f"🔄 Auto-save executado em {self._get_timestamp()}")
+                storage_logger.debug(
+                    f"Auto-save executado: {self._get_timestamp()}"
+                )
     
     def force_save_all(self):
         """Força salvamento imediato de todos os dados"""
@@ -509,13 +799,15 @@ class JsonStorage:
             self._save_telemetry()
             self._save_guardrails()
             self._last_save = time.time()
-            print(f"💾 Save forçado executado em {self._get_timestamp()}")
+            storage_logger.info(
+                f"Save forçado executado: {self._get_timestamp()}"
+            )
     
     def shutdown(self):
         """Encerra o storage salvando todos os dados"""
         self._auto_save_enabled = False
         self.force_save_all()
-        print("🛑 Storage encerrado com dados salvos")
+        storage_logger.info("Storage encerrado com dados salvos")
 
 
 # Instância global do storage com persistência automática

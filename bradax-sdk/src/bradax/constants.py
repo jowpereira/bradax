@@ -43,6 +43,66 @@ class SDKSecurityConstants:
     CONTENT_TYPE = 'application/json'
 
 
+class SDKTelemetryConstants:
+    """Constantes específicas de telemetria do SDK"""
+    
+    # Versão do SDK
+    SDK_VERSION = "1.0.0"
+    
+    # Headers de telemetria
+    HEADER_SDK_VERSION = "x-bradax-sdk-version"
+    HEADER_MACHINE_FINGERPRINT = "x-bradax-machine-fingerprint"
+    HEADER_SESSION_ID = "x-bradax-session-id"
+    HEADER_TELEMETRY_ENABLED = "x-bradax-telemetry-enabled"
+    HEADER_ENVIRONMENT = "x-bradax-environment"
+    HEADER_PLATFORM = "x-bradax-platform"
+    HEADER_PYTHON_VERSION = "x-bradax-python-version"
+    HEADER_TIMESTAMP = "x-bradax-timestamp"
+    HEADER_REQUEST_SOURCE = "x-bradax-request-source"
+    
+    # Valores padrão dos headers
+    TELEMETRY_ENABLED_VALUE = "true"
+    REQUEST_SOURCE_VALUE = "sdk"
+    DEFAULT_ENVIRONMENT = "development"
+    
+    # URLs
+    DEFAULT_BROKER_URL = "http://localhost:8001"
+    
+    # URLs padrão do broker para telemetria
+    DEFAULT_BROKER_URL = "http://localhost:8001"
+    DEVELOPMENT_BROKER_URL = "http://localhost:8001"
+    STAGING_BROKER_URL = "https://staging-broker.bradax.com"
+    PRODUCTION_BROKER_URL = "https://broker.bradax.com"
+    
+    # Ambiente padrão
+    DEFAULT_ENVIRONMENT = "development"
+    
+    # Headers de telemetria
+    HEADER_SDK_VERSION = "x-bradax-sdk-version"
+    HEADER_MACHINE_FINGERPRINT = "x-bradax-machine-fingerprint"
+    HEADER_SESSION_ID = "x-bradax-session-id"
+    HEADER_TELEMETRY_ENABLED = "x-bradax-telemetry-enabled"
+    HEADER_ENVIRONMENT = "x-bradax-environment"
+    HEADER_PLATFORM = "x-bradax-platform"
+    HEADER_PYTHON_VERSION = "x-bradax-python-version"
+    HEADER_TIMESTAMP = "x-bradax-timestamp"
+    HEADER_REQUEST_SOURCE = "x-bradax-request-source"
+    
+    # Configurações de cache
+    DEFAULT_CACHE_MAX_AGE_MINUTES = 60
+
+
+class SDKModelConstants:
+    """Constantes de modelos LLM do SDK"""
+    
+    # Modelo padrão
+    DEFAULT_MODEL = "gpt-4.1-nano"
+    
+    # Parâmetros padrão
+    DEFAULT_TEMPERATURE = 0.7
+    DEFAULT_MAX_TOKENS = 1000
+
+
 class SDKValidationConstants:
     """Constantes de validação do SDK"""
     

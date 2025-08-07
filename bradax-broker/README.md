@@ -68,6 +68,67 @@ print(response["content"])
 }
 ```
 
+## ⚙️ Configuração de Environment
+
+### Variáveis Obrigatórias
+
+```bash
+# JWT Secret (OBRIGATÓRIO para segurança)
+export BRADAX_JWT_SECRET="$(openssl rand -base64 32)"
+
+# OpenAI API Key (OBRIGATÓRIO para LLM)
+export OPENAI_API_KEY="sk-your-openai-key-here"
+```
+
+### Variáveis Opcionais
+
+```bash
+# Environment  
+export BRADAX_ENV="production"  # development|testing|staging|production
+
+# JWT Configuration
+export BRADAX_JWT_EXPIRE_MINUTES="15"  # Token expiration (default: 15min)
+
+# Rate Limiting
+export BRADAX_RATE_LIMIT_RPM="60"      # Requests per minute (default: 60)
+export BRADAX_RATE_LIMIT_RPH="1000"    # Requests per hour (default: 1000)
+export BRADAX_MAX_CONCURRENT="10"      # Max concurrent requests (default: 10)
+
+# Network Timeouts
+export BRADAX_HUB_LLM_TIMEOUT="180"    # LLM timeout in seconds (default: 180)
+```
+
+### Setup Rápido para Desenvolvimento
+
+```bash
+# Gerar JWT secret seguro
+export BRADAX_JWT_SECRET="$(openssl rand -base64 32)"
+
+# Configurar OpenAI  
+export OPENAI_API_KEY="sk-your-key-here"
+
+# Executar broker
+cd bradax-broker
+python -m uvicorn broker.main:app --reload --port 8080
+```
+
+### Setup para Produção
+
+```bash
+# JWT secret gerado com alta entropia
+export BRADAX_JWT_SECRET="$(openssl rand -base64 48)"
+
+# Environment de produção
+export BRADAX_ENV="production"
+
+# Rate limiting mais restritivo
+export BRADAX_RATE_LIMIT_RPM="30"
+export BRADAX_MAX_CONCURRENT="5"
+
+# Executar com bind específico
+python -m uvicorn broker.main:app --host 0.0.0.0 --port 8080
+```
+
 ## 🛠️ Endpoints Principais
 
 ### Autenticação e Projetos
