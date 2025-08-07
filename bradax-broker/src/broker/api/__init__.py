@@ -7,7 +7,7 @@ Centraliza e registra todos os routers de endpoints.
 from fastapi import APIRouter
 
 # Import dos routers individuais
-from .routes import health, auth, llm, metrics
+from .routes import health, auth, llm, metrics, system
 
 # Router principal da API
 api_router = APIRouter()
@@ -35,4 +35,10 @@ api_router.include_router(
     metrics.router,
     prefix="/metrics",
     tags=["Metrics & Monitoring"]
+)
+
+api_router.include_router(
+    system.router,
+    prefix="/system",
+    tags=["System"]
 )

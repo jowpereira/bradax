@@ -34,6 +34,7 @@ class InvokeRequest(BaseModel):
     payload: Dict[str, Any] = Field(..., description="Payload completo da requisição")
     project_id: Optional[str] = Field(None, description="ID do projeto")
     request_id: Optional[str] = Field(None, description="ID da requisição")
+    custom_guardrails: Optional[Dict[str, Any]] = Field({}, description="Guardrails customizados do SDK")
 
 
 @router.get("/models")
@@ -78,7 +79,8 @@ async def invoke(request: InvokeRequest) -> Dict[str, Any]:
             model_id=request.model,
             payload=request.payload,
             project_id=request.project_id,
-            request_id=request.request_id
+            request_id=request.request_id,
+            custom_guardrails=request.custom_guardrails  # CORREÇÃO: Passar guardrails customizados
         )
         return result
         

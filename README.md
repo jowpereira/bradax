@@ -38,6 +38,20 @@ bradax/
         └── auth/             # Autenticação empresarial
 ```
 
+## 📂 Estrutura de Dados
+
+```
+data/
+├── raw/                # Dados brutos para processamento
+│   ├── requests/       # Requisições enviadas ao sistema
+│   └── responses/      # Respostas geradas pelo sistema
+└── processed/          # Dados processados e prontos para uso
+```
+
+### Atualização Recente
+- Arquivos de requisição sem respostas correspondentes foram removidos para otimização.
+- Diretório `/data/raw/` agora contém apenas dados relevantes para análise e auditoria.
+
 ## ✨ Interface LangChain Moderna
 
 ### 🎯 **SDK com Padrão LangChain ✅**

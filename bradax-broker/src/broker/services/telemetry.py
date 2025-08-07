@@ -74,7 +74,7 @@ class TelemetryCollector:
     
     def __init__(self):
         self.environment = get_hub_environment()
-        self.storage_path = Path(HubStorageConstants.DATA_DIR)
+        self.storage_path = Path(HubStorageConstants.DATA_DIR())
         self.telemetry_file = self.storage_path / HubStorageConstants.TELEMETRY_FILE
         
         # Garantir diretório existe

@@ -69,6 +69,7 @@ class GuardrailResult:
     sanitized_content: Optional[str]
     severity: GuardrailSeverity
     reason: str
+    action: str  # CORREÇÃO CRÍTICA: Adicionar campo action que estava faltando
     metadata: Dict[str, Any]
     
     @property
@@ -91,8 +92,24 @@ class GuardrailEngine:
     
     def __init__(self):
         self.environment = get_hub_environment()
-        self.storage_path = Path(HubStorageConstants.DATA_DIR)
-        self.guardrails_file = self.storage_path / HubStorageConstants.GUARDRAILS_FILE
+        
+        # Usar caminho absoluto FORÇADO para evitar problemas de pasta
+        from pathlib import Path
+        current_dir = Path(__file__).resolve()
+        project_root = None
+        
+        # Subir diretórios até encontrar a pasta bradax
+        for parent in current_dir.parents:
+            if parent.name == "bradax":
+                project_root = parent
+                break
+        
+        if not project_root:
+            raise RuntimeError("Pasta raiz 'bradax' não encontrada - estrutura de projeto incorreta")
+        
+        from ..utils.paths import get_data_dir
+        self.storage_path = get_data_dir()
+        self.guardrails_file = self.storage_path / "guardrails.json"
         self.telemetry = get_telemetry_collector()
         
         # Inicializar LLM Service para validação inteligente
@@ -108,141 +125,189 @@ class GuardrailEngine:
         self._rules_cache: Dict[str, GuardrailRule] = {}
         self._cache_loaded = False
         
-        # Garantir diretório existe
-        self.storage_path.mkdir(exist_ok=True)
+        # Verificar se diretório existe
+        if not self.storage_path.exists():
+            raise RuntimeError(f"Diretório de dados não encontrado: {self.storage_path}")
         
-        # Carregar regras padrão se arquivo não existe
+        # SEMPRE carregar do arquivo JSON (fonte única de verdade)
         if not self.guardrails_file.exists():
-            self._create_default_rules()
+            raise RuntimeError(f"Arquivo de guardrails obrigatório não encontrado: {self.guardrails_file}")
         
-        self._load_rules()
+        self._create_default_rules()  # Na verdade carrega do JSON
         logger.info(f"GuardrailEngine iniciado - ambiente: {self.environment.value}")
     
     def _create_default_rules(self) -> None:
-        """Cria regras padrão de guardrails"""
-        default_rules = [
-            GuardrailRule(
-                rule_id="content_safety_001",
-                name="Conteúdo Ofensivo",
-                description="Bloqueia conteúdo ofensivo, discriminatório ou inadequado",
-                enabled=True,
-                severity=GuardrailSeverity.BLOCK,
-                action=GuardrailAction.BLOCK,
-                pattern=None,
-                keywords=[
-                    "violência", "ódio", "discriminação", "assédio", 
-                    "nudez", "pornografia", "drogas", "suicídio"
-                ],
-                whitelist=["contexto educacional", "discussão acadêmica"],
-                category="content_safety",
-                metadata={"auto_created": True}
-            ),
-            GuardrailRule(
-                rule_id="privacy_001", 
-                name="Dados Pessoais",
-                description="Detecta e protege informações pessoais sensíveis",
-                enabled=True,
-                severity=GuardrailSeverity.BLOCK,
-                action=GuardrailAction.SANITIZE,
-                pattern=r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b|[0-9]{11}|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-                keywords=["cpf", "cnpj", "email", "telefone", "endereço"],
-                whitelist=["exemplo@exemplo.com", "000.000.000-00"],
-                category="privacy",
-                metadata={"auto_created": True}
-            ),
-            GuardrailRule(
-                rule_id="business_001",
-                name="Informações Confidenciais",
-                description="Protege segredos comerciais e informações da empresa",
-                enabled=True,
-                severity=GuardrailSeverity.CRITICAL,
-                action=GuardrailAction.BLOCK,
-                pattern=None,
-                keywords=[
-                    "api key", "senha", "token", "secret", "confidencial",
-                    "proprietary", "internal only", "não divulgar"
-                ],
-                whitelist=["exemplo de token", "token de teste"],
-                category="business",
-                metadata={"auto_created": True}
-            ),
-            GuardrailRule(
-                rule_id="compliance_001",
-                name="Conformidade Legal",
-                description="Garante conformidade com regulamentações",
-                enabled=True,
-                severity=GuardrailSeverity.WARNING,
-                action=GuardrailAction.FLAG,
-                pattern=None,
-                keywords=["lgpd", "gdpr", "compliance", "auditoria", "regulamentação"],
-                whitelist=[],
-                category="compliance", 
-                metadata={"auto_created": True}
-            ),
-            GuardrailRule(
-                rule_id="prompt_injection_001",
-                name="Prompt Injection",
-                description="Detecta tentativas de manipulação do modelo",
-                enabled=True,
-                severity=GuardrailSeverity.BLOCK,
-                action=GuardrailAction.BLOCK,
-                pattern=r"ignore\s+(previous|above|all)\s+(instructions|prompts?|rules?)",
-                keywords=[
-                    "ignore instructions", "jailbreak", "override system",
-                    "act as", "pretend you are", "forget everything"
-                ],
-                whitelist=[],
-                category="security",
-                metadata={"auto_created": True}
-            ),
-            GuardrailRule(
-                rule_id="intelligent_content_001",
-                name="Análise Inteligente de Conteúdo",
-                description="Validação LLM para contexto, tom e adequação geral do conteúdo",
-                enabled=True,
-                severity=GuardrailSeverity.WARNING,
-                action=GuardrailAction.FLAG,
-                pattern=None,
-                keywords=[
-                    "contexto inadequado", "tom agressivo", "linguagem imprópria",
-                    "conteúdo questionável", "intenção duvidosa"
-                ],
-                whitelist=["contexto educacional", "discussão técnica", "exemplo hipotético"],
-                category="content_safety",
-                metadata={"auto_created": True, "llm_primary": True}
-            )
-        ]
+        """
+        Carrega regras de guardrails do arquivo JSON (fonte única de verdade).
         
-        # Salvar regras padrão - converter enums para strings
-        rules_data = []
-        for rule in default_rules:
-            rule_dict = asdict(rule)
-            rule_dict['severity'] = rule_dict['severity'].value
-            rule_dict['action'] = rule_dict['action'].value
-            rules_data.append(rule_dict)
+        IMPORTANTE: Regras padrão agora são definidas em data/guardrails.json
+        para permitir configuração dinâmica sem redeploy.
+        """
+        try:
+            # Usar caminho absoluto FORÇADO para raiz do projeto
+            import os
+            from pathlib import Path
             
-        with open(self.guardrails_file, 'w', encoding='utf-8') as f:
-            json.dump(rules_data, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"Regras padrão de guardrails criadas: {len(default_rules)} regras")
+            # Encontrar raiz do projeto (pasta bradax)
+            current_dir = Path(__file__).resolve()
+            project_root = None
+            
+            # Subir diretórios até encontrar a pasta bradax
+            for parent in current_dir.parents:
+                if parent.name == "bradax":
+                    project_root = parent
+                    break
+            
+            if not project_root:
+                raise FileNotFoundError("Pasta raiz 'bradax' não encontrada")
+            
+            from ..utils.paths import get_data_dir
+            guardrails_file = get_data_dir() / "guardrails.json"
+            
+            print(f"🔍 Tentando carregar: {guardrails_file}")
+            
+            if not guardrails_file.exists():
+                raise FileNotFoundError(f"Arquivo não encontrado: {guardrails_file}")
+            
+            with open(guardrails_file, 'r', encoding='utf-8') as f:
+                rules_data = json.load(f)
+            
+            print(f"📄 Arquivo lido com {len(rules_data)} regras")
+            
+            # Converter regras do JSON para objetos GuardrailRule
+            for rule_data in rules_data:
+                if not rule_data.get("enabled", True):
+                    print(f"   ⏭️ Pulando regra desabilitada: {rule_data.get('rule_id', 'unknown')}")
+                    continue
+                
+                # Mapear severidade do JSON para enum
+                severity_map = {
+                    "LOW": GuardrailSeverity.WARNING,
+                    "MEDIUM": GuardrailSeverity.WARNING, 
+                    "HIGH": GuardrailSeverity.BLOCK,
+                    "CRITICAL": GuardrailSeverity.CRITICAL
+                }
+                severity = severity_map.get(rule_data.get("severity")) # Coleta a severidade cadastrada na regra
+                
+                # Mapear ação do JSON para enum
+                action_map = {
+                    "flag": GuardrailAction.FLAG,
+                    "sanitize": GuardrailAction.SANITIZE,
+                    "block": GuardrailAction.BLOCK
+                }
+                action = action_map.get(rule_data.get("action", "flag"), GuardrailAction.FLAG)
+                
+                # Combinar todos os padrões regex em um único pattern
+                patterns = rule_data.get("patterns", {})
+                combined_pattern = None
+                if patterns:
+                    pattern_list = [f"({pattern})" for pattern in patterns.values() if pattern]
+                    if pattern_list:
+                        combined_pattern = "|".join(pattern_list)
+                
+                # Extrair keywords dos padrões e campos específicos
+                keywords = []
+                if "keywords" in rule_data:
+                    keywords.extend(rule_data["keywords"])
+                keywords.extend(patterns.keys())  # Adicionar nomes dos padrões como keywords
+                
+                # Criar regra
+                rule = GuardrailRule(
+                    rule_id=rule_data["rule_id"],
+                    name=rule_data["name"],
+                    description=rule_data.get("description", rule_data["name"]),
+                    enabled=rule_data.get("enabled", True),
+                    severity=severity,
+                    action=action,
+                    pattern=combined_pattern,
+                    keywords=keywords,
+                    whitelist=rule_data.get("whitelist", []),
+                    category=rule_data.get("category", "general"),
+                    metadata={"source": "json_file", "file_path": str(guardrails_file)}
+                )
+                
+                self._rules_cache[rule.rule_id] = rule
+                print(f"   ✅ Regra carregada: {rule.rule_id} - {rule.name}")
+            
+            print(f"✅ {len(self._rules_cache)} regras de guardrails carregadas de {guardrails_file}")
+            self._cache_loaded = True
+            
+        except Exception as e:
+            print(f"❌ ERRO CRÍTICO ao carregar regras de guardrails: {e}")
+            print(f"   Tipo: {type(e).__name__}")
+            print(f"   Sistema BLOQUEADO - nenhuma regra disponível")
+            raise RuntimeError(f"Sistema de guardrails falhou: {e}")
+
     
     def _load_rules(self) -> None:
         """Carrega regras do arquivo de configuração"""
+        # Se já carregamos via _create_default_rules, não duplicar
+        if self._cache_loaded:
+            print(f"📋 Regras já carregadas: {len(self._rules_cache)} regras")
+            return
+        
         try:
+            print(f"🔍 Carregando regras de: {self.guardrails_file}")
             with open(self.guardrails_file, 'r', encoding='utf-8') as f:
                 rules_data = json.load(f)
             
             self._rules_cache.clear()
+            
+            # Usar mesma lógica de conversão que _create_default_rules
             for rule_data in rules_data:
-                # Converter strings de enum de volta
-                rule_data['severity'] = GuardrailSeverity(rule_data['severity'])
-                rule_data['action'] = GuardrailAction(rule_data['action'])
+                if not rule_data.get("enabled", True):
+                    continue  # Pular regras desabilitadas
                 
-                rule = GuardrailRule(**rule_data)
+                # Mapear severidade do JSON para enum
+                severity_map = {
+                    "LOW": GuardrailSeverity.WARNING,
+                    "MEDIUM": GuardrailSeverity.WARNING, 
+                    "HIGH": GuardrailSeverity.BLOCK,
+                    "CRITICAL": GuardrailSeverity.CRITICAL
+                }
+                severity = severity_map.get(rule_data.get("severity", "MEDIUM"), GuardrailSeverity.WARNING)
+                
+                # Mapear ação do JSON para enum
+                action_map = {
+                    "flag": GuardrailAction.FLAG,
+                    "sanitize": GuardrailAction.SANITIZE,
+                    "block": GuardrailAction.BLOCK
+                }
+                action = action_map.get(rule_data.get("action", "flag"), GuardrailAction.FLAG)
+                
+                # Combinar todos os padrões regex em um único pattern
+                patterns = rule_data.get("patterns", {})
+                combined_pattern = None
+                if patterns:
+                    pattern_list = [f"({pattern})" for pattern in patterns.values() if pattern]
+                    if pattern_list:
+                        combined_pattern = "|".join(pattern_list)
+                
+                # Extrair keywords dos padrões e campos específicos
+                keywords = []
+                if "keywords" in rule_data:
+                    keywords.extend(rule_data["keywords"])
+                keywords.extend(patterns.keys())  # Adicionar nomes dos padrões como keywords
+                
+                # Criar regra
+                rule = GuardrailRule(
+                    rule_id=rule_data["rule_id"],
+                    name=rule_data["name"],
+                    description=rule_data.get("description", rule_data["name"]),
+                    enabled=rule_data.get("enabled", True),
+                    severity=severity,
+                    action=action,
+                    pattern=combined_pattern,
+                    keywords=keywords,
+                    whitelist=rule_data.get("whitelist", []),
+                    category=rule_data.get("category", "general"),
+                    metadata={"source": "json_file", "file_path": str(self.guardrails_file)}
+                )
+                
                 self._rules_cache[rule.rule_id] = rule
             
             self._cache_loaded = True
-            logger.info(f"Guardrails carregados: {len(self._rules_cache)} regras")
+            print(f"✅ Guardrails carregados via _load_rules: {len(self._rules_cache)} regras")
             
         except Exception as e:
             logger.error(f"Erro ao carregar guardrails: {e}")
@@ -322,17 +387,8 @@ RESPOSTA (JSON):
                     analysis_result["available"] = True
                     return analysis_result
             except (json.JSONDecodeError, ValueError):
-                pass
-            
-            # Fallback: análise simples baseada na resposta
-            violation = any(term in response_text.lower() for term in ["violation", "violação", "problem", "block"])
-            return {
-                "available": True,
-                "violation": violation,
-                "confidence": 0.5,
-                "explanation": "Análise LLM completada (formato simplificado)",
-                "raw_response": response_text[:200]
-            }
+                logger.warning(f"Resposta LLM não contém JSON válido: {response_text}")
+                return {"available": False, "violation": False, "error": "Resposta LLM inválida"}
             
         except Exception as e:
             logger.warning(f"Erro na análise LLM para regra {rule.rule_id}: {e}")
@@ -445,7 +501,7 @@ RESPOSTA (JSON):
                 self.telemetry.record_guardrail_trigger(
                     project_id=project_id,
                     guardrail_name=rule.name,
-                    blocked_content=content[:200],  # Primeiros 200 chars
+                    blocked_content=content,  # Conteúdo original bloqueado
                     endpoint=endpoint,
                     metadata={
                         "rule_id": rule.rule_id,
@@ -496,6 +552,16 @@ RESPOSTA (JSON):
         allowed = not blocking_action
         reason = "Aprovado" if allowed else f"Bloqueado por {len([r for r in self._rules_cache.values() if r.rule_id in triggered_rules and r.action == GuardrailAction.BLOCK])} regra(s)"
         
+        # Determinar ação predominante baseada nas regras acionadas
+        if blocking_action:
+            action = "BLOCK"
+        elif sanitized_content != content:
+            action = "SANITIZE"
+        elif triggered_rules:
+            action = "FLAG"
+        else:
+            action = "ALLOW"
+        
         result = GuardrailResult(
             allowed=allowed,
             triggered_rules=triggered_rules,
@@ -503,6 +569,7 @@ RESPOSTA (JSON):
             sanitized_content=sanitized_content if sanitized_content != content else None,
             severity=highest_severity,
             reason=reason,
+            action=action,  # CORREÇÃO CRÍTICA: Incluir campo action no resultado
             metadata={
                 "content_type": content_type,
                 "endpoint": endpoint,

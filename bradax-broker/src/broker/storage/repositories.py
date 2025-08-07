@@ -13,6 +13,7 @@ from typing import Dict, List, Any, Optional
 import uuid
 
 from .interfaces import IProjectRepository, ITelemetryRepository, IGuardrailRepository, RepositoryResult
+from ..logging_config import storage_logger
 from .json_storage import ProjectData, TelemetryData, GuardrailEvent
 
 
@@ -26,15 +27,23 @@ class BaseJsonRepository:
     
     def _ensure_file_exists(self):
         """Garante que o arquivo JSON existe"""
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.file_path.parent.exists():
+            raise RuntimeError(f"Diretório de dados não encontrado: {self.file_path.parent}")
         if not self.file_path.exists():
-            self._write_json([])
+            raise RuntimeError(f"Arquivo de dados não encontrado: {self.file_path}")
     
     def _read_json(self) -> List[Dict[str, Any]]:
         """Lê dados do arquivo JSON com tratamento de erro"""
         try:
             with open(self.file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                # VALIDAR: Se for um dicionário, converter para lista
+                if isinstance(data, dict):
+                    return list(data.values())
+                elif isinstance(data, list):
+                    return data
+                else:
+                    return []
         except (json.JSONDecodeError, FileNotFoundError):
             return []
     
@@ -45,7 +54,9 @@ class BaseJsonRepository:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
-            print(f"Erro ao escrever arquivo {self.file_path}: {e}")
+            storage_logger.error(
+                f"Erro ao escrever arquivo {self.file_path}: {str(e)}"
+            )
             return False
     
     async def _safe_operation(self, operation):

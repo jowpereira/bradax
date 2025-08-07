@@ -61,10 +61,16 @@ class OpenAIProvider(LLMProvider):
                 severity=ErrorSeverity.CRITICAL
             )
         
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        # Buscar chave API usando múltiplas possibilidades
+        self.api_key = (
+            os.getenv("OPENAI_API_KEY") or 
+            os.getenv("BRADAX_BROKER_OPENAI_API_KEY") or
+            os.getenv("OPENAI_KEY")
+        )
+        
         if not self.api_key:
             raise BradaxConfigurationException(
-                message="Chave API OpenAI não configurada",
+                message="Chave API OpenAI não configurada. Configure OPENAI_API_KEY ou BRADAX_BROKER_OPENAI_API_KEY",
                 config_key="OPENAI_API_KEY",
                 severity=ErrorSeverity.CRITICAL
             )
@@ -72,8 +78,10 @@ class OpenAIProvider(LLMProvider):
         try:
             self.client = ChatOpenAI(
                 api_key=self.api_key,
-                model="gpt-3.5-turbo",
-                temperature=0.7
+                model="gpt-4.1-nano",
+                temperature=0.7,
+                timeout=180.0,  # 3 minutos
+                max_retries=2
             )
         except Exception as e:
             raise BradaxTechnicalException(
@@ -173,7 +181,13 @@ def get_available_providers() -> Dict[str, LLMProvider]:
     
     if not available_providers:
         # Registra apenas providers que estão efetivamente disponíveis
-        if LANGCHAIN_AVAILABLE and os.getenv("OPENAI_API_KEY"):
+        openai_key = (
+            os.getenv("OPENAI_API_KEY") or 
+            os.getenv("BRADAX_BROKER_OPENAI_API_KEY") or
+            os.getenv("OPENAI_KEY")
+        )
+        
+        if LANGCHAIN_AVAILABLE and openai_key:
             try:
                 openai_provider = OpenAIProvider()
                 if openai_provider.is_available():

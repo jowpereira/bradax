@@ -7,6 +7,7 @@ Configurações específicas do servidor Hub que valida projetos via SDK.
 from typing import Dict, List, Any
 from enum import Enum
 import os
+from .utils.paths import get_project_root, get_data_dir
 
 
 class BradaxEnvironment(Enum):
@@ -46,7 +47,14 @@ class HubSecurityConstants:
     # JWT
     JWT_EXPIRATION_MINUTES = int(os.getenv('BRADAX_JWT_EXPIRE_MINUTES', '15'))
     JWT_ALGORITHM = 'HS256'
-    JWT_SECRET_KEY = os.getenv('BRADAX_JWT_SECRET', 'dev-secret-change-in-production')
+    
+    # 🔒 JWT SECRET: OBRIGATÓRIO via environment variable
+    JWT_SECRET_KEY = os.getenv('BRADAX_JWT_SECRET')
+    if not JWT_SECRET_KEY:
+        raise ValueError(
+            "🚨 ERRO DE CONFIGURAÇÃO: BRADAX_JWT_SECRET environment variable é obrigatória. "
+            "Use: export BRADAX_JWT_SECRET='$(openssl rand -base64 32)' para gerar um secret seguro."
+        )
     
     # API Keys
     API_KEY_PREFIX = 'bradax_'
@@ -114,6 +122,57 @@ class HubBudgetConstants:
     
     # Billing cycle
     BILLING_CYCLE_DAYS = 30
+
+
+class HubStorageConstants:
+    """Constantes para armazenamento e telemetria"""
+    
+    # SISTEMA CENTRALIZADO DE PATHS - SEMPRE usar /bradax/data/
+    from .utils.paths import get_project_root, get_data_dir
+
+    @staticmethod
+    def PROJECT_ROOT():
+        return get_project_root()
+
+    @staticmethod
+    def DATA_DIR():
+        return str(get_data_dir())
+
+    @staticmethod
+    def RAW_REQUESTS_DIR():
+        return f"{HubStorageConstants.DATA_DIR()}/raw/requests"
+
+    @staticmethod
+    def RAW_RESPONSES_DIR():
+        return f"{HubStorageConstants.DATA_DIR()}/raw/responses"
+
+    @staticmethod
+    def METRICS_DIR():
+        return f"{HubStorageConstants.DATA_DIR()}/metrics"
+
+    @staticmethod
+    def LOGS_DIR():
+        return f"{HubStorageConstants.DATA_DIR()}/logs"
+
+    @staticmethod
+    def ARCHIVE_DIR():
+        return f"{HubStorageConstants.DATA_DIR()}/archive"
+
+    # Arquivos de dados
+    TELEMETRY_FILE = "telemetry.json"
+    GUARDRAILS_FILE = "guardrails.json"  # Arquivo de REGRAS de guardrails
+    GUARDRAIL_EVENTS_FILE = "guardrail_events.json"  # Arquivo de EVENTOS de guardrails
+    PROJECTS_FILE = "projects.json"
+    METRICS_FILE = "telemetry.parquet"
+
+    # Configurações de arquivo
+    MAX_FILE_SIZE_MB = 10
+    MAX_CACHE_EVENTS = 100
+    RETENTION_DAYS = 30
+
+
+# ALIAS para compatibilidade (sistema unificado)
+BradaxStorageConstants = HubStorageConstants
 
 
 def get_hub_environment() -> BradaxEnvironment:

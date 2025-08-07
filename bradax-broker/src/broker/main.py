@@ -135,6 +135,10 @@ def setup_middlewares(app: FastAPI):
     app.add_middleware(SecurityMiddleware)
     app.add_middleware(RateLimitingMiddleware) 
     app.add_middleware(LoggingMiddleware)
+    
+    # Middleware de validação de telemetria
+    from .middleware.telemetry_validation import TelemetryValidationMiddleware
+    app.add_middleware(TelemetryValidationMiddleware)
 
 
 def setup_routes(app: FastAPI):

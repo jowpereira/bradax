@@ -22,7 +22,12 @@ from .interfaces import (
 class LLMRegistry(ILLMRegistry):
     """Registry para modelos LLM com persistência JSON"""
     
-    def __init__(self, file_path: str = "data/llm_models.json"):
+    def __init__(self, file_path: str = None):
+        # ALWAYS use absolute path to project root data folder
+        if file_path is None:
+            from ...utils.paths import get_data_dir
+            file_path = str(get_data_dir() / "llm_models.json")
+        
         self.file_path = Path(file_path)
         self.lock = threading.RLock()
         self._ensure_file_exists()

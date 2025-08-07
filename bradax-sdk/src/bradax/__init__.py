@@ -8,6 +8,15 @@ telemetria e guardrails obrigatórios (não desabilitáveis).
 # Cliente principal
 from .client import BradaxClient
 
+# Telemetry interceptor
+from .telemetry_interceptor import (
+    TelemetryInterceptor,
+    initialize_global_telemetry, 
+    get_telemetry_interceptor,
+    chat_completion,
+    completion
+)
+
 # Classes de exceção 
 from .exceptions.bradax_exceptions import (
     BradaxError,

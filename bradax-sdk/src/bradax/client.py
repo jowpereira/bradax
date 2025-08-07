@@ -37,6 +37,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import BradaxSDKConfig, get_sdk_config
+from .telemetry_interceptor import TelemetryInterceptor, get_telemetry_interceptor
+from .logging_config import BradaxSDKLogger
 from .exceptions.bradax_exceptions import (
     BradaxError,
     BradaxAuthenticationError,
@@ -45,9 +47,6 @@ from .exceptions.bradax_exceptions import (
     BradaxValidationError,
     BradaxBrokerError
 )
-
-# Configuração de logging
-logger = logging.getLogger("bradax")
 
 
 class BradaxClient:
@@ -60,7 +59,8 @@ class BradaxClient:
         timeout: Optional[int] = None,
         max_retries: int = 3,
         verbose: bool = False,
-        config: Optional[BradaxSDKConfig] = None
+        config: Optional[BradaxSDKConfig] = None,
+        **kwargs  # Capturar tentativas de burla
     ):
         """
         Inicializa um novo cliente bradax.
@@ -72,7 +72,27 @@ class BradaxClient:
             max_retries: Número máximo de tentativas de reconexão
             verbose: Se True, exibe logs detalhados
             config: Configuração do SDK (usa global se None)
+            
+        Raises:
+            BradaxConfigurationError: Se tentar desabilitar telemetria
         """
+        # 🚨 PROTEÇÃO ANTI-BURLA: Bloquear desabilitação de telemetria
+        if 'telemetry_enabled' in kwargs and not kwargs['telemetry_enabled']:
+            raise BradaxConfigurationError(
+                "🚨 VIOLAÇÃO DE SEGURANÇA: Telemetria é obrigatória e não pode ser desabilitada. "
+                "Todas as interações devem ser auditadas conforme política corporativa."
+            )
+        
+        if 'disable_telemetry' in kwargs and kwargs['disable_telemetry']:
+            raise BradaxConfigurationError(
+                "🚨 VIOLAÇÃO DE SEGURANÇA: Tentativa de bypass da telemetria detectada. "
+                "O uso do SDK requer auditoria completa."
+            )
+        
+        # 🔒 FORÇAR TELEMETRIA SEMPRE ATIVA
+        self.telemetry_enabled = True
+        self.telemetry_mandatory = True
+        
         # Verificar se o primeiro parâmetro é um objeto de config
         if isinstance(project_token, BradaxSDKConfig):
             config = project_token
@@ -100,6 +120,9 @@ class BradaxClient:
             "Authorization": f"Bearer {project_token}",
         })
         
+        # Configurar logger estruturado  
+        self.logger = BradaxSDKLogger("bradax.sdk.client", verbose=self.verbose)
+        
         self.client = httpx.Client(
             timeout=self.timeout,
             headers=headers
@@ -107,14 +130,24 @@ class BradaxClient:
         
         # Configuração de logs
         if self.verbose:
-            logger.setLevel(logging.DEBUG)
+            self.logger.logger.setLevel(logging.DEBUG)
             
         # Inicializar contadores de telemetria local
         self._telemetry_count = 0
         self._operation_types = set()
+        
+        # Inicializar interceptor de telemetria para enviar dados ao broker
+        self.telemetry_interceptor = get_telemetry_interceptor(self.broker_url)
             
-        logger.debug(f"BradaxClient inicializado para {self.broker_url}")
-        logger.debug(f"Configuração: {self.config.environment}, guardrails personalizados: {self.config.has_custom_guardrails()}")
+        self.logger.debug(
+            "BradaxClient inicializado", 
+            extra_data={
+                "broker_url": self.broker_url,
+                "environment": self.config.environment,
+                "has_custom_guardrails": self.config.has_custom_guardrails(),
+                "timeout": self.timeout
+            }
+        )
         
     def validate_connection(self) -> Dict[str, Any]:
         """
@@ -195,15 +228,23 @@ class BradaxClient:
             "model": model_id,
             "payload": payload,
             "project_id": None,  # Será extraído do token no broker
-            "request_id": request_id
+            "request_id": request_id,
+            "custom_guardrails": self.config.get_custom_guardrails()  # CORREÇÃO: Enviar guardrails para broker
         }
         
-        logger.info(f"🔄 Invoke genérico: {operation} | Modelo: {model_id}")
+        self.logger.info(
+            "Invoke genérico iniciado", 
+            extra_data={"operation": operation, "model": model_id, "request_id": request_id}
+        )
+        
+        # 🔒 GERAR HEADERS DE TELEMETRIA OBRIGATÓRIOS  
+        telemetry_headers = self.telemetry_interceptor.get_telemetry_headers()
         
         try:
             response = self.client.post(
                 f"{self.broker_url}/api/v1/llm/invoke",
-                json=request_data
+                json=request_data,
+                headers=telemetry_headers  # ← CORREÇÃO: Headers obrigatórios
             )
             
             if response.status_code == 401:
@@ -227,9 +268,15 @@ class BradaxClient:
             result = response.json()
             
             if result.get("success"):
-                logger.info(f"✅ Invoke genérico concluído: {result.get('request_id')}")
+                self.logger.info(
+                    "Invoke genérico concluído", 
+                    extra_data={"request_id": result.get('request_id')}
+                )
             else:
-                logger.warning(f"⚠️ Invoke genérico falhou: {result.get('error')}")
+                self.logger.warning(
+                    "Invoke genérico falhou", 
+                    extra_data={"error": result.get('error')}
+                )
             
             return result
             
@@ -306,10 +353,16 @@ class BradaxClient:
                     if potential_project_id.startswith('projeto-') and potential_project_id[-3:].isdigit():
                         project_id = potential_project_id
                         if self.verbose:
-                            print(f"🔍 Project ID extraído do token: {project_id}")
+                            self.logger.info(
+                                "Project ID extraído do token", 
+                                extra_data={"project_id": project_id}
+                            )
         except Exception as e:
             if self.verbose:
-                print(f"⚠️ Erro ao fazer parse do token: {e}")
+                self.logger.warning(
+                    "Erro ao fazer parse do token", 
+                    extra_data={"error": str(e)}
+                )
         
         # Estratégia 2: Consultar broker se parse falhou
         if not project_id:
@@ -325,11 +378,17 @@ class BradaxClient:
                         project_data = data['data']
                         project_id = project_data.get('project_id')
                         if self.verbose and project_id:
-                            print(f"🔍 Project ID obtido do broker: {project_id}")
+                            self.logger.info(
+                                "Project ID obtido do broker", 
+                                extra_data={"project_id": project_id}
+                            )
                             
             except Exception as e:
                 if self.verbose:
-                    print(f"⚠️ Erro ao consultar broker para project_id: {e}")
+                    self.logger.warning(
+                        "Erro ao consultar broker para project_id", 
+                        extra_data={"error": str(e)}
+                    )
         
         # Estratégia 3: Fallback - usar hash do token como project_id
         if not project_id:
@@ -337,7 +396,10 @@ class BradaxClient:
             token_hash = hashlib.md5(self.project_token.encode()).hexdigest()[:8]
             project_id = f"projeto-sdk-{token_hash}"
             if self.verbose:
-                print(f"🔍 Project ID fallback gerado: {project_id}")
+                self.logger.info(
+                    "Project ID fallback gerado", 
+                    extra_data={"project_id": project_id}
+                )
         
         # Cache do resultado
         self._cached_project_id = project_id
@@ -402,13 +464,42 @@ class BradaxClient:
                     "max_tokens": kwargs.get("max_tokens", config.get("max_tokens", 1000)),
                     "temperature": kwargs.get("temperature", config.get("temperature", 0.7)),
                     **{k: v for k, v in kwargs.items() if k not in ["model", "max_tokens", "temperature"]}
-                }
+                },
+                "custom_guardrails": self.config.get_custom_guardrails()  # CORREÇÃO: Enviar guardrails para broker
             }
             
-            # Executar via broker
+            # 🔒 VERIFICAÇÃO OBRIGATÓRIA DE TELEMETRIA
+            if not self.telemetry_enabled:
+                raise BradaxConfigurationError(
+                    "🚨 VIOLAÇÃO DE SEGURANÇA: Telemetria desabilitada detectada. "
+                    "Todas as invocações devem ser auditadas."
+                )
+            
+            # INTERCEPTAÇÃO TELEMETRIA: Capturar request antes do envio
+            request_data = self.telemetry_interceptor.intercept_request(
+                prompt=input_,
+                model=model,
+                temperature=kwargs.get("temperature", config.get("temperature", 0.7)),
+                max_tokens=kwargs.get("max_tokens", config.get("max_tokens", 1000)),
+                metadata={
+                    "operation": "invoke",
+                    "config": config,
+                    "kwargs": kwargs,
+                    "payload": payload,
+                    "security_check": "telemetry_verified"
+                }
+            )
+            
+            # 🔒 GERAR HEADERS DE TELEMETRIA OBRIGATÓRIOS
+            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers(
+                session_id=request_data.get("request_id")
+            )
+            
+            # Executar via broker COM HEADERS DE TELEMETRIA
             response = self.client.post(
                 f"{self.broker_url}/api/v1/llm/invoke",
-                json=payload
+                json=payload,
+                headers=telemetry_headers  # ← CORREÇÃO CRÍTICA: Headers obrigatórios
             )
             
             if response.status_code == 200:
@@ -416,8 +507,8 @@ class BradaxClient:
                 
                 # Verificar se foi sucesso
                 if result.get("success"):
-                    # Retornar formato compatível com LangChain
-                    return {
+                    # Formato de resposta compatível com LangChain
+                    langchain_response = {
                         "content": result.get("response_text", ""),
                         "response_metadata": {
                             "model": model,
@@ -426,14 +517,54 @@ class BradaxClient:
                             "request_id": result.get("request_id")
                         }
                     }
+                    
+                    # INTERCEPTAÇÃO TELEMETRIA: Capturar response após sucesso
+                    self.telemetry_interceptor.capture_response(
+                        request_data=request_data,
+                        response_data=langchain_response,
+                        raw_response=result,
+                        success=True
+                    )
+                    
+                    # Retornar formato compatível com LangChain
+                    return langchain_response
                 else:
                     # Caso de erro do broker
                     error_msg = result.get("error", "Erro desconhecido")
+                    
+                    # INTERCEPTAÇÃO TELEMETRIA: Capturar erro do broker
+                    self.telemetry_interceptor.capture_response(
+                        request_data=request_data,
+                        response_data=None,
+                        raw_response=result,
+                        success=False,
+                        error_message=error_msg
+                    )
+                    
                     raise BradaxBrokerError(f"Erro no broker: {error_msg}")
             else:
+                # INTERCEPTAÇÃO TELEMETRIA: Capturar erro HTTP
+                self.telemetry_interceptor.capture_response(
+                    request_data=request_data,
+                    response_data=None,
+                    raw_response={"status_code": response.status_code, "text": response.text},
+                    success=False,
+                    error_message=f"Erro HTTP: {response.status_code}"
+                )
+                
                 raise BradaxBrokerError(f"Erro HTTP: {response.status_code} - {response.text}")
                 
         except httpx.RequestError as e:
+            # INTERCEPTAÇÃO TELEMETRIA: Capturar erro de conexão
+            if 'request_data' in locals():
+                self.telemetry_interceptor.capture_response(
+                    request_data=request_data,
+                    response_data=None,
+                    raw_response=None,
+                    success=False,
+                    error_message=f"Conexão falhou: {str(e)}"
+                )
+            
             raise BradaxConnectionError(f"Falha de conexão ao executar invoke: {str(e)}")
     
     async def ainvoke(
@@ -490,12 +621,37 @@ class BradaxClient:
                     "temperature": kwargs.get("temperature", 0.7),
                     "max_tokens": kwargs.get("max_tokens", 1000),
                     **{k: v for k, v in kwargs.items() if k not in ["operation", "model", "max_tokens", "temperature"]}
-                }
+                },
+                "custom_guardrails": self.config.get_custom_guardrails()  # CORREÇÃO: Enviar guardrails para broker
             }
             
-            # Executar via broker (usando httpx async com mesmos headers)
+            # INTERCEPTAÇÃO TELEMETRIA: Capturar request antes do envio
+            request_data = self.telemetry_interceptor.intercept_request(
+                prompt=input_,
+                model=model,
+                temperature=kwargs.get("temperature", config.get("temperature", 0.7)),
+                max_tokens=kwargs.get("max_tokens", config.get("max_tokens", 1000)),
+                metadata={
+                    "operation": "ainvoke",
+                    "config": config,
+                    "kwargs": kwargs,
+                    "payload": payload,
+                    "is_async": True
+                }
+            )
+            
+            # Executar via broker (usando httpx async com headers de telemetria)
             project_token = os.getenv('BRADAX_PROJECT_TOKEN', 'default-token')
+            
+            # 🔒 GERAR HEADERS DE TELEMETRIA OBRIGATÓRIOS (HOTFIX)
+            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers(
+                project_id=self.config.project_id,
+                session_id=payload.get('session_id')
+            )
+            
+            # Combinar headers de config com telemetria
             headers = self.config.get_headers()
+            headers.update(telemetry_headers)
             headers.update({
                 "Authorization": f"Bearer {project_token}",
             })
@@ -512,8 +668,8 @@ class BradaxClient:
                 
                 # Verificar se foi sucesso
                 if result.get("success"):
-                    # Retornar formato compatível com LangChain
-                    return {
+                    # Formato de resposta compatível com LangChain
+                    langchain_response = {
                         "content": result.get("response_text", ""),
                         "response_metadata": {
                             "model": model,
@@ -522,14 +678,54 @@ class BradaxClient:
                             "request_id": result.get("request_id")
                         }
                     }
+                    
+                    # INTERCEPTAÇÃO TELEMETRIA: Capturar response após sucesso
+                    self.telemetry_interceptor.capture_response(
+                        request_data=request_data,
+                        response_data=langchain_response,
+                        raw_response=result,
+                        success=True
+                    )
+                    
+                    # Retornar formato compatível com LangChain
+                    return langchain_response
                 else:
                     # Caso de erro do broker
                     error_msg = result.get("error", "Erro desconhecido")
+                    
+                    # INTERCEPTAÇÃO TELEMETRIA: Capturar erro do broker
+                    self.telemetry_interceptor.capture_response(
+                        request_data=request_data,
+                        response_data=None,
+                        raw_response=result,
+                        success=False,
+                        error_message=error_msg
+                    )
+                    
                     raise BradaxBrokerError(f"Erro no broker: {error_msg}")
             else:
+                # INTERCEPTAÇÃO TELEMETRIA: Capturar erro HTTP
+                self.telemetry_interceptor.capture_response(
+                    request_data=request_data,
+                    response_data=None,
+                    raw_response={"status_code": response.status_code, "text": response.text},
+                    success=False,
+                    error_message=f"Erro HTTP: {response.status_code}"
+                )
+                
                 raise BradaxBrokerError(f"Erro HTTP: {response.status_code} - {response.text}")
                 
         except httpx.RequestError as e:
+            # INTERCEPTAÇÃO TELEMETRIA: Capturar erro de conexão
+            if 'request_data' in locals():
+                self.telemetry_interceptor.capture_response(
+                    request_data=request_data,
+                    response_data=None,
+                    raw_response=None,
+                    success=False,
+                    error_message=f"Conexão falhou: {str(e)}"
+                )
+            
             raise BradaxConnectionError(f"Falha de conexão ao executar ainvoke: {str(e)}")
     
     # REMOVIDO: Métodos duplicados invoke_generic() e generate_text()
@@ -562,51 +758,8 @@ class BradaxClient:
             else:
                 raise BradaxConnectionError(f"Network error accessing broker: {str(e)}")
     
-    def validate_content(self, content: str) -> Dict[str, Any]:
-        """
-        Validação local de conteúdo usando guardrails configurados.
-        
-        Args:
-            content: Conteúdo a ser validado
-            
-        Returns:
-            Dict com resultado da validação: {"is_safe": bool, "violations": list}
-        """
-        import re
-        
-        is_safe = True
-        violations = []
-        
-        # Verificar guardrails customizados primeiro
-        for rule_id, rule in self.config.custom_guardrails.items():
-            pattern = rule.get("pattern")
-            if pattern:
-                try:
-                    if re.search(pattern, content, re.IGNORECASE):
-                        is_safe = False
-                        message = rule.get("message", f"Regra {rule_id} violada")
-                        violations.append(f"Custom guardrail: {message}")
-                except re.error:
-                    # Pattern inválido, ignorar
-                    pass
-        
-        # Verificar alguns padrões básicos de segurança (guardrails padrão)
-        unsafe_patterns = [
-            "senha", "password", "token", "secret", "key",
-            "cpf", "cnpj", "email", "@", "telefone", "cartão"
-        ]
-        
-        content_lower = content.lower()
-        for pattern in unsafe_patterns:
-            if pattern in content_lower:
-                is_safe = False
-                violations.append(f"Conteúdo sensível detectado: {pattern}")
-        
-        return {
-            "is_safe": is_safe,
-            "violations": violations,
-            "content_length": len(content)
-        }
+    # REMOVIDO: validate_content() - Toda validação é centralizada no broker
+    # Use o broker para todas as validações via guardrails
     
     def record_telemetry_event(self, event_data: Dict[str, Any]) -> bool:
         """
@@ -626,7 +779,7 @@ class BradaxClient:
             
             # Se telemetria local estiver desabilitada, apenas simular
             if not self.config.local_telemetry_enabled:
-                logger.debug("Telemetria local desabilitada - evento ignorado")
+                self.logger.debug("Telemetria local desabilitada - evento ignorado")
                 return True
             
             response = self.client.post(
@@ -641,7 +794,10 @@ class BradaxClient:
             return response.status_code in [200, 201]
             
         except httpx.RequestError as e:
-            logger.warning(f"Erro ao registrar telemetria: {e}")
+            self.logger.warning(
+                "Erro ao registrar telemetria", 
+                extra_data={"error": str(e)}
+            )
             return False
     
     def get_local_telemetry(self) -> Dict[str, Any]:
@@ -687,7 +843,10 @@ class BradaxClient:
         
         # Adicionar à configuração local
         self.config.set_custom_guardrail(rule["id"], rule)
-        logger.info(f"Regra de guardrail '{rule['id']}' adicionada")
+        self.logger.info(
+            "Regra de guardrail adicionada", 
+            extra_data={"rule_id": rule["id"], "rule_type": rule["type"], "severity": rule["severity"]}
+        )
     
     async def send_llm_request(
         self,

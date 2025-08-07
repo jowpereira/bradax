@@ -22,6 +22,7 @@ from ..exceptions import (
     ValidationException,
     ConfigurationException
 )
+from .project_storage import get_project_storage
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +68,14 @@ class ProjectAuth:
         self.environment = get_hub_environment()
         self._validate_configuration()
         
+        # Storage real de projetos - SEM CACHE LOCAL
+        self.storage = get_project_storage()
+        
         # Cache de sessões ativas (em produção usar Redis)
         self._active_sessions: Dict[str, ProjectSession] = {}
         
         logger.info(f"ProjectAuth inicializado para ambiente: {self.environment.value}")
+        logger.info(f"Storage de projetos: {len(self.storage.list_active_projects())} projetos ativos")
     
     def _validate_configuration(self) -> None:
         """Valida configuração de segurança obrigatória"""
@@ -113,22 +118,39 @@ class ProjectAuth:
         return api_key
     
     def validate_api_key(self, api_key: str) -> bool:
-        """Valida formato da API key"""
+        """
+        Valida formato da API key - FALHA EXPLICITAMENTE
+        
+        Raises:
+            ValidationException: API key inválida ou mal formada
+        """
         if not api_key or not isinstance(api_key, str):
-            return False
+            raise ValidationException(
+                "API key deve ser string não vazia",
+                details={"provided_type": type(api_key).__name__}
+            )
         
         if not api_key.startswith(HubSecurityConstants.API_KEY_PREFIX):
-            return False
+            raise ValidationException(
+                f"API key deve começar com '{HubSecurityConstants.API_KEY_PREFIX}'",
+                details={"provided_prefix": api_key[:20] + "..." if len(api_key) > 20 else api_key}
+            )
         
         # Valida comprimento mínimo
         min_length = len(HubSecurityConstants.API_KEY_PREFIX) + 20
         if len(api_key) < min_length:
-            return False
+            raise ValidationException(
+                f"API key muito curta (mínimo: {min_length} caracteres)",
+                details={"provided_length": len(api_key), "minimum_required": min_length}
+            )
         
-        # Valida padrão básico (prefixo + componentes separados por _)
+        # Valida padrão obrigatório (prefixo + componentes separados por _)
         parts = api_key[len(HubSecurityConstants.API_KEY_PREFIX):].split('_')
         if len(parts) < 4:
-            return False
+            raise ValidationException(
+                "API key deve ter 4 componentes separados por underscore",
+                details={"found_components": len(parts), "required_components": 4}
+            )
         
         return True
     
@@ -146,11 +168,14 @@ class ProjectAuth:
         Raises:
             AuthenticationException: Falha na autenticação
         """
-        # Validação básica
-        if not self.validate_api_key(api_key):
+        # Validação rigorosa - SEM FALLBACKS SILENCIOSOS
+        try:
+            self.validate_api_key(api_key)
+        except ValidationException as e:
             raise AuthenticationException(
-                "Formato de API key inválido",
-                details={"api_key_prefix": api_key[:20] + "..." if len(api_key) > 20 else api_key}
+                f"API key inválida: {e.message}",
+                auth_method="api_key",
+                details=e.details
             )
         
         if not project_id:
@@ -162,21 +187,41 @@ class ProjectAuth:
         except Exception as e:
             raise AuthenticationException(
                 "Falha ao analisar API key",
+                auth_method="api_key",
                 details={"error": str(e)}
             )
         
-        # Validar correspondência
+        # Validar correspondência de projeto
         if project_info.get('project_id') != project_id:
             raise AuthenticationException(
                 "API key não corresponde ao project_id fornecido",
+                auth_method="api_key",
                 details={
                     "expected_project": project_id,
                     "key_project": project_info.get('project_id')
                 }
             )
         
-        # Criar sessão
-        session = self._create_session(project_info, api_key)
+        # VALIDAÇÃO REAL: Verificar se projeto existe e está ativo no storage
+        try:
+            project_data = self.storage.get_project(project_id)
+        except ValidationException as e:
+            raise AuthenticationException(
+                f"Projeto não encontrado ou inativo: {e.message}",
+                auth_method="api_key",
+                details=e.details
+            )
+        
+        # VALIDAÇÃO REAL: Verificar hash da API key
+        if not self.storage.verify_api_key_hash(project_id, api_key):
+            raise AuthenticationException(
+                "API key não corresponde ao hash armazenado",
+                auth_method="api_key",
+                details={"project_id": project_id}
+            )
+        
+        # Criar sessão com dados reais do storage
+        session = self._create_session(project_info, api_key, project_data)
         
         # Cache da sessão
         self._active_sessions[session.session_id] = session
@@ -185,35 +230,70 @@ class ProjectAuth:
         return session
     
     def _parse_api_key(self, api_key: str) -> Dict[str, Any]:
-        """Extrai informações da API key"""
+        """
+        Extrai informações da API key - FALHA EXPLICITAMENTE
+        
+        Raises:
+            ValidationException: API key mal formada
+        """
         # Remove prefixo
         key_body = api_key[len(HubSecurityConstants.API_KEY_PREFIX):]
         parts = key_body.split('_')
         
         if len(parts) < 4:
-            raise ValueError("API key com formato inválido")
+            raise ValidationException(
+                "API key com estrutura inválida",
+                details={"found_parts": len(parts), "required_parts": 4}
+            )
+        
+        # VALIDAÇÃO RIGOROSA: organization_id NÃO PODE SER 'default'
+        organization_id = parts[1]
+        if organization_id == 'default':
+            raise ValidationException(
+                "organization_id 'default' não é permitido - deve ser ID corporativo válido",
+                details={"invalid_org_id": organization_id}
+            )
         
         return {
             'project_id': parts[0],
-            'organization_id': parts[1] if parts[1] != 'default' else None,
+            'organization_id': organization_id,
             'random_part': parts[2],
             'timestamp': parts[3]
         }
     
-    def _create_session(self, project_info: Dict[str, Any], api_key: str) -> ProjectSession:
-        """Cria nova sessão de projeto"""
+    def _create_session(self, project_info: Dict[str, Any], api_key: str, project_data: Dict[str, Any]) -> ProjectSession:
+        """
+        Cria nova sessão de projeto com dados REAIS do storage
+        
+        Args:
+            project_info: Dados extraídos da API key
+            api_key: API key original
+            project_data: Dados completos do projeto do storage
+            
+        Returns:
+            ProjectSession: Sessão com dados reais
+            
+        Raises:
+            ValidationException: Dados de projeto inválidos
+        """
         session_id = secrets.token_hex(16)
         expires_at = datetime.utcnow() + timedelta(minutes=HubSecurityConstants.JWT_EXPIRATION_MINUTES)
         
-        # Permissões padrão baseadas no ambiente
-        permissions = self._get_default_permissions()
+        # Permissões REAIS baseadas no projeto
+        permissions = self.storage.get_project_permissions(project_info['project_id'])
         
-        # Orçamento padrão (deve vir de storage em implementação real)
-        budget_remaining = 1000.0  # Placeholder - implementar storage
+        # BUDGET REAL do storage - SEM FALLBACKS
+        try:
+            budget_remaining = self.storage.get_project_budget(project_info['project_id'])
+        except ValidationException as e:
+            raise ValidationException(
+                f"Projeto sem orçamento válido configurado: {e.message}",
+                details=e.details
+            )
         
         return ProjectSession(
             project_id=project_info['project_id'],
-            organization_id=project_info.get('organization_id'),
+            organization_id=project_info['organization_id'],  # Já validado como não-'default'
             permissions=permissions,
             budget_remaining=budget_remaining,
             environment=self.environment.value,
@@ -221,8 +301,10 @@ class ProjectAuth:
             expires_at=expires_at,
             metadata={
                 'created_from_api_key': api_key[:20] + "...",
-                'user_agent': None,  # Será preenchido na requisição
-                'ip_address': None   # Será preenchido na requisição
+                'project_name': project_data.get('name', 'UNKNOWN'),
+                'project_owner': project_data.get('owner', 'UNKNOWN'),
+                'guardrails_level': project_data.get('config', {}).get('guardrails', {}).get('level', 'NONE'),
+                'created_at': datetime.utcnow().isoformat()
             }
         )
     
@@ -261,6 +343,7 @@ class ProjectAuth:
         if not session:
             raise AuthenticationException(
                 "Sessão não encontrada",
+                auth_method="session",
                 details={"session_id": session_id}
             )
         
@@ -269,6 +352,7 @@ class ProjectAuth:
             del self._active_sessions[session_id]
             raise AuthenticationException(
                 "Sessão expirada",
+                auth_method="session",
                 details={"expired_at": session.expires_at.isoformat()}
             )
         
