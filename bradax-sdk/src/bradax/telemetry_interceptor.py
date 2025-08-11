@@ -175,6 +175,43 @@ class TelemetryInterceptor:
     def completion(self, model: str, prompt: str, **kwargs) -> str:
         messages = [{"role": "user", "content": prompt}]
         return self.intercept_llm_request(model, messages, **kwargs)
+    
+    def intercept_request(self, prompt, model, temperature, max_tokens, metadata):
+        """Intercepta requisição para capturar dados de telemetria"""
+        request_data = {
+            "request_id": str(uuid.uuid4()),
+            "timestamp": datetime.utcnow().isoformat(),
+            "prompt": str(prompt),
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "metadata": metadata,
+            "session_id": self.session_id,
+            "project_id": self.project_id
+        }
+        return request_data
+    
+    def capture_response(self, request_data, response_data, raw_response, success, error_message=None):
+        """Captura dados de resposta para auditoria"""
+        try:
+            telemetry_data = {
+                "request_id": request_data["request_id"],
+                "success": success,
+                "timestamp_response": datetime.utcnow().isoformat(),
+                "response_data": response_data,
+                "error_message": error_message,
+                "session_id": self.session_id
+            }
+            
+            # Aqui poderia salvar em arquivo local ou enviar para broker
+            telemetry_logger.debug(f"Telemetria capturada: success={success}")
+            
+        except Exception as e:
+            telemetry_logger.warning(f"Erro ao capturar telemetria: {e}")
+    
+    def get_telemetry_headers(self):
+        """Compatibilidade com client.py - retorna headers de telemetria"""
+        return self._get_telemetry_headers()
 
 # Global interceptor
 _global_telemetry_interceptor: Optional[TelemetryInterceptor] = None

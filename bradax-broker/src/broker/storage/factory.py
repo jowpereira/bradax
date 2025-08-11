@@ -16,24 +16,33 @@ class RepositoryFactory:
     _instances: Dict[str, Any] = {}
     
     @classmethod
-    def get_project_repository(cls, file_path: str = "data/projects.json") -> IProjectRepository:
+    def get_project_repository(cls, file_path: str = None) -> IProjectRepository:
         """Retorna instância singleton do ProjectRepository"""
+        if file_path is None:
+            from ..utils.paths import get_data_dir
+            file_path = str(get_data_dir() / "projects.json")
         key = f"project_{file_path}"
         if key not in cls._instances:
             cls._instances[key] = ProjectRepository(file_path)
         return cls._instances[key]
     
     @classmethod
-    def get_telemetry_repository(cls, file_path: str = "data/telemetry.json") -> ITelemetryRepository:
+    def get_telemetry_repository(cls, file_path: str = None) -> ITelemetryRepository:
         """Retorna instância singleton do TelemetryRepository"""
+        if file_path is None:
+            from ..utils.paths import get_data_dir
+            file_path = str(get_data_dir() / "telemetry.json")
         key = f"telemetry_{file_path}"
         if key not in cls._instances:
             cls._instances[key] = TelemetryRepository(file_path)
         return cls._instances[key]
     
     @classmethod
-    def get_guardrail_repository(cls, file_path: str = "data/guardrails.json") -> IGuardrailRepository:
+    def get_guardrail_repository(cls, file_path: str = None) -> IGuardrailRepository:
         """Retorna instância singleton do GuardrailRepository"""
+        if file_path is None:
+            from ..utils.paths import get_data_dir
+            file_path = str(get_data_dir() / "guardrail_events.json")
         key = f"guardrail_{file_path}"
         if key not in cls._instances:
             cls._instances[key] = GuardrailRepository(file_path)

@@ -37,7 +37,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import BradaxSDKConfig, get_sdk_config
-from .telemetry_interceptor import TelemetryInterceptor, get_telemetry_interceptor
+from .telemetry_interceptor import TelemetryInterceptor, initialize_global_telemetry
 from .logging_config import BradaxSDKLogger
 from .exceptions.bradax_exceptions import (
     BradaxError,
@@ -60,7 +60,7 @@ class BradaxClient:
         max_retries: int = 3,
         verbose: bool = False,
         config: Optional[BradaxSDKConfig] = None,
-        **kwargs  # Capturar tentativas de burla
+        **kwargs
     ):
         """
         Inicializa um novo cliente bradax.
@@ -88,10 +88,6 @@ class BradaxClient:
                 "🚨 VIOLAÇÃO DE SEGURANÇA: Tentativa de bypass da telemetria detectada. "
                 "O uso do SDK requer auditoria completa."
             )
-        
-        # 🔒 FORÇAR TELEMETRIA SEMPRE ATIVA
-        self.telemetry_enabled = True
-        self.telemetry_mandatory = True
         
         # Verificar se o primeiro parâmetro é um objeto de config
         if isinstance(project_token, BradaxSDKConfig):
@@ -137,7 +133,11 @@ class BradaxClient:
         self._operation_types = set()
         
         # Inicializar interceptor de telemetria para enviar dados ao broker
-        self.telemetry_interceptor = get_telemetry_interceptor(self.broker_url)
+        from .telemetry_interceptor import initialize_global_telemetry
+        self.telemetry_interceptor = initialize_global_telemetry(self.broker_url, self.project_token)
+        
+        # Telemetria é sempre habilitada (não pode ser desabilitada)
+        self.telemetry_enabled = True
             
         self.logger.debug(
             "BradaxClient inicializado", 
@@ -181,12 +181,6 @@ class BradaxClient:
                 
         except httpx.RequestError as e:
             raise BradaxConnectionError(f"Não foi possível conectar ao broker: {str(e)}")
-            
-    # REMOVIDO: run_llm() - Redundante com invoke()
-    # Use invoke() para execução de LLM com compatibilidade LangChain
-    
-    # REMOVIDO: run_langchain() - Redundante com invoke() e ainvoke()
-    # Use invoke() ou ainvoke() para compatibilidade LangChain completa
             
     def invoke_generic(
         self,
@@ -491,15 +485,25 @@ class BradaxClient:
             )
             
             # 🔒 GERAR HEADERS DE TELEMETRIA OBRIGATÓRIOS
-            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers(
-                session_id=request_data.get("request_id")
-            )
+            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers()
             
-            # Executar via broker COM HEADERS DE TELEMETRIA
+            # Combinar headers (telemetria + config + auth) – manter telemetria obrigatória
+            headers = {}
+            try:
+                headers.update(self.config.get_headers())  # headers adicionais do SDK/config
+            except Exception:
+                pass
+            headers.update(telemetry_headers)
+            # Authorization: usar token explícito se disponível (priorizar self.project_token)
+            project_token = os.getenv('BRADAX_PROJECT_TOKEN') or getattr(self, 'project_token', None)
+            if project_token:
+                headers['Authorization'] = f"Bearer {project_token}"
+
+            # Executar via broker COM HEADERS COMPLETOS
             response = self.client.post(
                 f"{self.broker_url}/api/v1/llm/invoke",
                 json=payload,
-                headers=telemetry_headers  # ← CORREÇÃO CRÍTICA: Headers obrigatórios
+                headers=headers
             )
             
             if response.status_code == 200:
@@ -644,10 +648,7 @@ class BradaxClient:
             project_token = os.getenv('BRADAX_PROJECT_TOKEN', 'default-token')
             
             # 🔒 GERAR HEADERS DE TELEMETRIA OBRIGATÓRIOS (HOTFIX)
-            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers(
-                project_id=self.config.project_id,
-                session_id=payload.get('session_id')
-            )
+            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers()
             
             # Combinar headers de config com telemetria
             headers = self.config.get_headers()
@@ -728,9 +729,7 @@ class BradaxClient:
             
             raise BradaxConnectionError(f"Falha de conexão ao executar ainvoke: {str(e)}")
     
-    # REMOVIDO: Métodos duplicados invoke_generic() e generate_text()
-    # Use os métodos originais definidos anteriormente no arquivo
-    
+
     def check_broker_health(self) -> Dict[str, Any]:
         """
         Verifica saúde do broker.
@@ -846,36 +845,6 @@ class BradaxClient:
         self.logger.info(
             "Regra de guardrail adicionada", 
             extra_data={"rule_id": rule["id"], "rule_type": rule["type"], "severity": rule["severity"]}
-        )
-    
-    async def send_llm_request(
-        self,
-        prompt: str,
-        model: str = "gpt-4.1-nano",
-        max_tokens: int = 1000,
-        temperature: float = 0.7,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Método assíncrono para envio de requisições LLM.
-        
-        Args:
-            prompt: Texto do prompt
-            model: Modelo a usar
-            max_tokens: Máximo de tokens
-            temperature: Temperatura da resposta
-            **kwargs: Argumentos adicionais
-            
-        Returns:
-            Resposta do LLM
-        """
-        # Usar ainvoke internamente para consistência
-        return await self.ainvoke(
-            input_=prompt,
-            config={"model": model},
-            max_tokens=max_tokens,
-            temperature=temperature,
-            **kwargs
         )
             
     def close(self) -> None:

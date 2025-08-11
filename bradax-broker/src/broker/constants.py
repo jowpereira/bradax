@@ -165,12 +165,6 @@ class HubStorageConstants:
     PROJECTS_FILE = "projects.json"
     METRICS_FILE = "telemetry.parquet"
 
-    # Configurações de arquivo
-    MAX_FILE_SIZE_MB = 10
-    MAX_CACHE_EVENTS = 100
-    RETENTION_DAYS = 30
-
-
 # ALIAS para compatibilidade (sistema unificado)
 BradaxStorageConstants = HubStorageConstants
 

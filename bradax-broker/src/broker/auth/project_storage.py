@@ -239,6 +239,28 @@ class ProjectStorage:
                 validation_rule="status_must_be_active"
             )
         
+        # VALIDAÇÃO CRÍTICA: Modelos permitidos devem estar habilitados na plataforma
+        allowed_models = project_data.get('allowed_models', [])
+        if allowed_models:
+            for model_id in allowed_models:
+                try:
+                    # Verifica se o modelo existe e está ativo no registry
+                    model = self.llm_registry.get_model(model_id)
+                    if not model.enabled:
+                        raise ValidationException(
+                            f"Projeto {project_id} usa modelo desabilitado: {model_id}",
+                            field_name="allowed_models",
+                            invalid_value=model_id,
+                            validation_rule="model_must_be_enabled"
+                        )
+                except Exception as e:
+                    raise ValidationException(
+                        f"Projeto {project_id} com modelo inválido: {model_id} - {e}",
+                        field_name="allowed_models",
+                        invalid_value=model_id,
+                        validation_rule="model_must_exist_and_be_enabled"
+                    )
+        
         # Valida estrutura de config
         config = project_data.get('config', {})
         if not isinstance(config, dict):

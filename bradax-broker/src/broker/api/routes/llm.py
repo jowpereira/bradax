@@ -4,7 +4,8 @@ Rotas da API LLM - Usando Controllers MVC
 Endpoints para operações de LLM com controllers dedicados.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+import logging
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
@@ -58,8 +59,7 @@ async def get_available_models(project_id: Optional[str] = None) -> Dict[str, An
 
 
 @router.post("/invoke")
-@router.post("/invoke")
-async def invoke(request: InvokeRequest) -> Dict[str, Any]:
+async def invoke(request: InvokeRequest, raw: Request) -> Dict[str, Any]:
     """
     Invocação central para wrapper LangChain
     
@@ -74,11 +74,27 @@ async def invoke(request: InvokeRequest) -> Dict[str, Any]:
     """
     try:
         # Executar invoke via controller
+        # Se project_id ausente no payload, tentar extrair de Authorization: Bearer <token>
+        project_id = request.project_id
+        if not project_id:
+            auth_header = raw.headers.get('authorization') or raw.headers.get('Authorization')
+            if auth_header and auth_header.lower().startswith('bearer '):
+                bearer_token = auth_header.split(' ', 1)[1].strip()
+                # Heurística simples: tokens do formato proj_* usados diretamente
+                if bearer_token.startswith('proj_'):
+                    project_id = bearer_token
+        try:
+            logging.getLogger("bradax.api.invoke").info(
+                "invoke_route_project_resolution",
+                extra={"resolved_project_id": project_id, "has_auth": bool(raw.headers.get('authorization'))}
+            )
+        except Exception:
+            pass
         result = await llm_controller.invoke(
             operation=request.operation,
             model_id=request.model,
             payload=request.payload,
-            project_id=request.project_id,
+            project_id=project_id,
             request_id=request.request_id,
             custom_guardrails=request.custom_guardrails  # CORREÇÃO: Passar guardrails customizados
         )

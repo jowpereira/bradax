@@ -218,37 +218,13 @@ class TelemetryCollector:
         endpoint: str,
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Registra ativação de guardrail (bloqueio)"""
-        
-        event = TelemetryEvent(
-            event_id=str(uuid.uuid4()),
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            project_id=project_id,
-            user_id=None,
-            event_type="guardrail_triggered",
-            endpoint=endpoint,
-            method=None,
-            request_size=None,
-            response_size=None,
-            duration_ms=None,
-            status_code=403,  # Forbidden
-            model_used=None,
-            tokens_consumed=None,
-            cost_usd=None,
-            error_type="guardrail_block",
-            error_message=f"Conteúdo bloqueado por {guardrail_name}",
-            user_agent=None,
-            ip_address=None,
-            sdk_version=None,
-            guardrail_triggered=guardrail_name,
-            metadata={
-                "blocked_content": blocked_content[:500],  # Limitar tamanho
-                **(metadata or {})
-            }
+        """(Depreciado) Guardrails agora registrados exclusivamente em guardrail_events.json.
+        Mantido para compatibilidade: não registra mais no telemetry.json para evitar duplicação.
+        """
+        logger.info(
+            f"[telemetry] Ignorado guardrail_triggered (uso de guardrail_events.json): {project_id} -> {guardrail_name}"
         )
-        
-        self._add_event(event)
-        logger.warning(f"Guardrail ativado: {project_id} -> {guardrail_name}")
+        return
     
     def record_authentication(
         self,

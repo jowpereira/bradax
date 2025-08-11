@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "C:\Users\letha\OneDrive\desktop\WorkSpace\bradax\bradax-broker\run.py", line 50, in <module>
+    main()
+  File "C:\Users\letha\OneDrive\desktop\WorkSpace\bradax\bradax-broker\run.py", line 21, in main
+    print("\U0001f680 Iniciando Bradax Broker...")
+  File "C:\Users\letha\anaconda3\lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680' in position 0: character maps to <undefined>

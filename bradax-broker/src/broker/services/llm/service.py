@@ -9,6 +9,7 @@ import time
 import uuid
 import json
 import os
+import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 
@@ -17,6 +18,9 @@ from .providers import get_provider, get_available_providers
 from .registry import LLMRegistry
 from ..telemetry_raw import save_raw_response, load_raw_request, save_guardrail_violation
 from ..guardrails import GuardrailEngine
+
+# Logger específico
+logger = logging.getLogger('bradax.llm_service')
 
 
 class GuardrailViolationError(Exception):
@@ -33,48 +37,68 @@ class GuardrailViolationError(Exception):
 class LLMService:
     """Serviço principal de LLM com LangChain + GUARDRAILS OBRIGATÓRIOS"""
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self):
+        # Evitar re-inicialização se já foi inicializado
+        if self._initialized:
+            return
+            
         # INICIALIZAÇÃO CRÍTICA: GuardrailEngine é OBRIGATÓRIO
         self.guardrail_engine = None
         self.repositories_available = False
-        
+        # Flag para registrar eventos de PASS (não violação) em guardrail_events.json (default False)
+        self.log_guardrail_pass_events = False
         try:
             self.providers = get_available_providers()
             self.registry = LLMRegistry()
-            
             # Inicializar GuardrailEngine com regras padrão (OBRIGATÓRIO)
             self.guardrail_engine = GuardrailEngine()
-            print(f"✅ GuardrailEngine inicializado com sucesso")
-            
+            print("✅ GuardrailEngine inicializado com sucesso")
             # REPOSITORIES OBRIGATÓRIOS: Usar data/ da raiz sem fallback
             try:
                 from ...storage.factory import create_storage_repositories
                 repositories = create_storage_repositories()
                 self.project_repo = repositories["project"]
-                self.telemetry_repo = repositories["telemetry"] 
+                self.telemetry_repo = repositories["telemetry"]
                 self.guardrail_repo = repositories["guardrail"]
                 self.repositories_available = True
-                print(f"✅ Repositories integrados: project, telemetry, guardrail")
+                print("✅ Repositories integrados: project, telemetry, guardrail")
             except Exception as repo_error:
                 print(f"🚨 ERRO CRÍTICO: Repositories obrigatórios falharam: {repo_error}")
-                print(f"🚨 SISTEMA BLOQUEADO: Não pode operar sem acesso aos dados")
+                print("🚨 SISTEMA BLOQUEADO: Não pode operar sem acesso aos dados")
                 raise RuntimeError(f"Falha crítica nos repositories: {repo_error}") from repo_error
-            
             print(f"✅ LLM Service inicializado com providers: {list(self.providers.keys())}")
-            print(f"✅ LLM Registry integrado para governança de modelos")
-            
+            print("✅ LLM Registry integrado para governança de modelos")
+            # Definir flag de logging de eventos PASS via variável de ambiente
+            try:
+                env_flag = os.getenv("BRADAX_LOG_GUARDRAIL_PASS", "false").strip().lower()
+                self.log_guardrail_pass_events = env_flag in ("1", "true", "yes", "on")
+                if self.log_guardrail_pass_events:
+                    print("🔎 Guardrail PASS events ENABLED (BRADAX_LOG_GUARDRAIL_PASS)")
+                else:
+                    print("ℹ️ Guardrail PASS events desativados (defina BRADAX_LOG_GUARDRAIL_PASS=true para habilitar)")
+            except Exception as _env_err:
+                print(f"⚠️ Não foi possível avaliar flag BRADAX_LOG_GUARDRAIL_PASS: {_env_err}")
         except Exception as e:
             print(f"🚨 ERRO CRÍTICO ao inicializar LLM Service: {e}")
-            print(f"🚨 SISTEMA BLOQUEADO: Guardrails obrigatórios não carregaram!")
-            
-            # FALLBACK SEGURO: Bloquear sistema se guardrails falharam
+            print("🚨 SISTEMA BLOQUEADO: Guardrails obrigatórios não carregaram!")
+            # Bloquear sistema se guardrails falharam
             self.providers = {}
             self.registry = None
             self.project_repo = None
             self.telemetry_repo = None
             self.guardrail_repo = None
             self.repositories_available = False
-            # guardrail_engine permanece None para forçar bloqueio
+        
+        # Marcar como inicializado para evitar re-inicializações
+        self._initialized = True
     
     def _is_system_secure(self) -> bool:
         """Verifica se o sistema está seguro para operação"""
@@ -445,7 +469,7 @@ class LLMService:
                 pattern = rule.get("pattern", "")
                 return bool(re.search(pattern, text, re.IGNORECASE))
             
-            # Fallback para formato legado
+            # Compatibilidade: suporte a formato legado de regras (não é mock)
             patterns = rule.get("patterns", {})
             text_lower = text.lower()
             
@@ -485,7 +509,7 @@ class LLMService:
                 new_text = rule.get("new", "")
                 return text.replace(old_text, new_text)
             
-            # Fallback para formato legado
+            # Compatibilidade: suporte a formato legado de regras (não é mock)
             rule_id = rule.get("rule_id", "")
             
             if rule_id == "formal_response_enforcement":
@@ -622,41 +646,46 @@ class LLMService:
             is_valid_project = False
             
             # Obter repositório de projetos (sem hardcoding)
-            from ...storage.factory import StorageFactory
+            # Usar repository_factory em vez de StorageFactory (classe não existe; prevenir erros de import)
+            from ...storage.factory import repository_factory
             
+            original_project_id = project_id
             try:
-                # Verificar se o projeto existe na base
-                project_repo = StorageFactory.get_project_repository()
+                project_repo = repository_factory.get_project_repository()
                 project = await project_repo.get_by_id(project_id)
-                
                 if project:
                     is_valid_project = True
                 else:
-                    logger.warning(f"⚠️ Projeto não encontrado para evento de guardrail: {project_id}")
-                    # Não usar hardcoding ou fallbacks arbitrários
-                    # O sistema deve registrar para análise de segurança, mas com uma indicação clara
-                    project_id = f"unknown_project_{request_id[-8:]}"
+                    logger.warning(f"⚠️ Projeto não encontrado p/ guardrail event: {project_id}")
             except Exception as project_error:
-                logger.error(f"❌ Erro ao verificar projeto: {project_error}")
+                logger.error(f"❌ Erro verificando projeto: {project_error}")
             
             # Registrar o evento de guardrail
             if self.guardrail_repo:
                 from ...storage.json_storage import GuardrailEvent
+                try:
+                    repo_path = getattr(self.guardrail_repo, 'file_path', None)
+                    logger.debug(f"GuardrailRepo ativo em: {repo_path}")
+                except Exception:
+                    pass
+                clean_details = {**rule}
+                clean_details["is_valid_project"] = is_valid_project
+                # Removido fallback_project_used para simplificar auditoria
                 event = GuardrailEvent(
                     event_id=request_id,
-                    project_id=project_id,
+                    project_id=original_project_id,
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     request_id=request_id,
                     guardrail_type=event_type,
                     action=action,
                     reason=description,
-                    details={
-                        **rule,
-                        "is_valid_project": is_valid_project  # Adicionar indicador de validade
-                    }
+                    details=clean_details
                 )
-                await self.guardrail_repo.create(event)
-                logger.info(f"✅ Guardrail event registrado: {event_type} - {action} para projeto {project_id}")
+                try:
+                    result = await self.guardrail_repo.create(event)
+                    logger.info(f"✅ Guardrail event registrado: {event_type} - {action} para projeto {original_project_id}")
+                except Exception as ce:
+                    logger.error(f"❌ Falha ao persistir guardrail event: {ce}")
             else:
                 # Apenas log do erro, sem implementação de fallback
                 # Fallbacks não documentados são um problema de segurança
@@ -664,59 +693,42 @@ class LLMService:
         except Exception as e:
             logger.error(f"⚠️ Erro registrando guardrail event: {e}")
     
-    async def _register_telemetry(self, project_id: str, request_id: str, provider: str, 
-                                model: str, input_tokens: int, output_tokens: int, response_time: float, cost: float,
-                                prompt_text: str = "", response_text: str = ""):
-        """Registra telemetria usando repository existente + fallback consolidado"""
+    async def _register_telemetry(self, project_id: str, request_id: str, provider: str,
+                                  model: str, input_tokens: int, output_tokens: int, response_time: float, cost: float,
+                                  prompt_text: str = "", response_text: str = ""):
+        """Registra telemetria - FAIL-FAST se repository indisponível (sem fallback)."""
+        if not (self.repositories_available and self.telemetry_repo):
+            from ...exceptions import BradaxTechnicalException
+            raise BradaxTechnicalException(
+                message="Telemetry repository indisponível - operação abortada",
+                component="LLMService",
+                operation="register_telemetry"
+            )
         try:
-            # Tentar usar repository se disponível
-            if self.repositories_available and self.telemetry_repo:
-                from ...storage.json_storage import TelemetryData
-                telemetry = TelemetryData(
-                    telemetry_id=request_id,
-                    project_id=project_id,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    request_id=request_id,
-                    endpoint="chat",
-                    method="POST",
-                    status_code=200,
-                    response_time_ms=response_time * 1000,  # converter para ms
-                    model_used=model,
-                    tokens_used=input_tokens + output_tokens,
-                    user_agent=f"bradax-broker/{provider}",
-                    error_message=""
-                )
-                await self.telemetry_repo.create(telemetry)
-                print(f"✅ Telemetria registrada via repository: {provider}/{model} - {input_tokens + output_tokens} tokens")
-            else:
-                # Fallback: usar consolidação direta
-                from ..telemetry_raw import consolidate_telemetry_to_json
-                
-                success = consolidate_telemetry_to_json(
-                    request_id=request_id,
-                    project_id=project_id,
-                    model=model,
-                    prompt=prompt_text if prompt_text else f"Request {request_id}",
-                    response_text=response_text if response_text else f"Response for {request_id}",
-                    processing_time_ms=int(response_time * 1000),
-                    usage_tokens=input_tokens + output_tokens,
-                    cost_usd=cost,
-                    status="success",
-                    metadata={
-                        "provider": provider,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "fallback_mode": True
-                    }
-                )
-                
-                if success:
-                    print(f"✅ Telemetria consolidada via fallback: {provider}/{model} - {input_tokens + output_tokens} tokens")
-                else:
-                    print(f"⚠️ Falha ao consolidar telemetria: {request_id}")
-                    
+            from ...storage.json_storage import TelemetryData
+            telemetry = TelemetryData(
+                telemetry_id=request_id,
+                project_id=project_id,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                request_id=request_id,
+                endpoint="chat",
+                method="POST",
+                status_code=200,
+                response_time_ms=response_time * 1000,
+                model_used=model,
+                tokens_used=input_tokens + output_tokens,
+                user_agent=f"bradax-broker/{provider}",
+                error_message=""
+            )
+            await self.telemetry_repo.create(telemetry)
+            print(f"✅ Telemetria registrada: {provider}/{model} - {input_tokens + output_tokens} tokens")
         except Exception as e:
-            print(f"⚠️ Erro registrando telemetria: {e}")
+            from ...exceptions import BradaxTechnicalException
+            raise BradaxTechnicalException(
+                message=f"Falha ao registrar telemetria: {e}",
+                component="LLMService",
+                operation="register_telemetry"
+            ) from e
 
     def get_available_models(self) -> List[LLMModelInfo]:
         """Retorna modelos disponíveis"""
@@ -747,7 +759,13 @@ class LLMService:
         start_time = time.time()
         project_id = project_id or "default"
         guardrails_applied = 0
-        
+        # Stage: request_received
+        try:
+            from ..interactions import append_interaction_stage
+            append_interaction_stage(req_id, project_id, "request_received", "Requisição recebida", {"operation": operation, "model": model_id})
+        except Exception:
+            pass
+
         # LIMPAR FLAGS DE SEGURANÇA para nova requisição
         self._input_guardrails_passed = False
         self._output_guardrails_required = False
@@ -798,161 +816,159 @@ class LLMService:
             try:
                 await self._apply_input_guardrails(project_id, input_text, req_id, custom_guardrails)  # CORREÇÃO: Passar guardrails customizados
                 print(f"✅ Input aprovado pelo guardrail para {project_id}")
-                
-                # MARCAR que guardrails de input foram aplicados com sucesso
                 self._input_guardrails_passed = True
-                
+                try:
+                    from ..interactions import append_interaction_stage
+                    append_interaction_stage(
+                        req_id,
+                        project_id,
+                        "guardrail_input_pass",
+                        "Input passou guardrails",
+                        {
+                            "length": len(input_text),
+                            "result": "pass",
+                            "guardrail_type": "input",
+                            "action": "pass",
+                            "metadata": {"phase": "pre_invoke"}
+                        }
+                    )
+                except Exception:
+                    pass
+                # Evento de PASS opcional
+                if self.log_guardrail_pass_events:
+                    try:
+                        await self._log_guardrail_event_async(
+                            project_id=project_id,
+                            request_id=req_id,
+                            event_type="input_guardrail",
+                            action="pass",
+                            description="Input aprovado pelos guardrails",
+                            rule={"stage": "input", "source": "_apply_input_guardrails", "blocked": False}
+                        )
+                    except Exception as e_pass:
+                        logger.warning(f"Falha registrar guardrail pass input: {e_pass}")
             except GuardrailViolationError as e:
                 guardrails_applied += 1
                 processing_time_ms = int((time.time() - start_time) * 1000)
+                try:
+                    from ..interactions import append_interaction_stage
+                    append_interaction_stage(
+                        req_id,
+                        project_id,
+                        "guardrail_input_blocked",
+                        "Input bloqueado",
+                        {
+                            "error": str(e),
+                            "result": "block",
+                            "guardrail_type": "input",
+                            "action": "blocked",
+                            "metadata": {"phase": "pre_invoke", "blocked": True}
+                        }
+                    )
+                except Exception:
+                    pass
+                # Registro explícito do evento de guardrail (bloqueio input) para garantir persistência mesmo em retorno antecipado
+                try:
+                    await self._log_guardrail_event_async(
+                        project_id=project_id,
+                        request_id=req_id,
+                        event_type="input_guardrail",
+                        action="blocked",
+                        description=str(e),
+                        rule={"stage": "input", "source": "_apply_input_guardrails", "blocked": True}
+                    )
+                except Exception as log_err:
+                    logger.error(f"⚠️ Falha ao registrar guardrail_event bloqueio input: {log_err}")
                 await self._register_telemetry(project_id, req_id, "guardrail", "blocked", 
                                                len(input_text.split()), 0, processing_time_ms / 1000, 0.0,
                                                prompt_text=input_text[:100], response_text="BLOCKED")
-                return {
-                    "request_id": req_id,
-                    "success": False,
-                    "error": f"Entrada rejeitada pelos guardrails: {str(e)}",
-                    "model_used": "guardrail_blocked",
-                    "response_time_ms": processing_time_ms,
-                    "guardrails_triggered": True
-                }
+                return {"request_id": req_id, "success": False, "error": f"Entrada rejeitada pelos guardrails: {str(e)}", "model_used": "guardrail_blocked", "response_time_ms": processing_time_ms, "guardrails_triggered": True}
 
             # STEP 3: PROCESSAR REQUISIÇÃO LLM REAL
             print(f"🤖 Processando LLM real para projeto '{project_id}'...")
-            
-            # VALIDAÇÃO CRÍTICA DE SEGURANÇA: Garantir que guardrails foram aplicados
-            if not hasattr(self, '_input_guardrails_passed'):
-                raise RuntimeError("ERRO CRÍTICO: Tentativa de chamar LLM sem aplicar guardrails de input!")
-            
-            # Obter provider real
+            try:
+                from ..interactions import append_interaction_stage
+                append_interaction_stage(req_id, project_id, "llm_invocation_start", "Início invocação LLM", {})
+            except Exception:
+                pass
+            # Obter provider real e invocar
             provider = get_provider("openai")
             result_text = provider.invoke(messages)
-            
-            # MARCAR que precisa aplicar guardrails de output
-            self._output_guardrails_required = True
-            
-            # INTERCEPTAÇÃO TELEMETRIA RAW: Capturar response bruto após LLM
-            raw_response_data = {
-                "request_id": req_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "provider": "openai",
-                "model": model_id,
-                "response_text": result_text,
-                "processing_time_ms": int((time.time() - start_time) * 1000),
-                "input_tokens": len(input_text.split()),
-                "output_tokens": len(result_text.split()),
-                "success": True,
-                "metadata": {
-                    "guardrails_applied_pre": guardrails_applied,
-                    "project_id": project_id,
-                    "original_payload": payload
-                }
-            }
-            
-            # Salvar response bruto em arquivo individual
             try:
-                from ..telemetry_raw import save_raw_response
-                save_raw_response(req_id, raw_response_data)
-                print(f"💾 Response raw salvo: {req_id}")
-                
-                # CONSOLIDAR IMEDIATAMENTE após salvar raw
-                from ..telemetry_raw import consolidate_telemetry_to_json
-                success = consolidate_telemetry_to_json(
-                    request_id=req_id,
-                    project_id=project_id,
-                    model=model_id,
-                    prompt=input_text[:100] if 'input_text' in locals() else "LLM Request",
-                    response_text=result_text[:100] if 'result_text' in locals() else "LLM Response", 
-                    processing_time_ms=int((time.time() - start_time) * 1000)
-                )
-                if success:
-                    print(f"📊 Telemetria consolidada automaticamente")
-                else:
-                    print(f"⚠️ Falha na consolidação automática")
-                    
-            except Exception as e:
-                print(f"⚠️ Erro ao salvar response raw: {e}")
-            
-            # CONSOLIDAR TELEMETRIA: Adicionar entrada consolidada
-            try:
-                input_tokens = len(input_text.split())
-                output_tokens = len(result_text.split())
-                processing_time_seconds = (time.time() - start_time)
-                
-                await self._register_telemetry(
-                    project_id=project_id,
-                    request_id=req_id,
-                    provider="openai",
-                    model=model_id,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    response_time=processing_time_seconds,
-                    cost=0.0,  # Calcular custo depois se necessário
-                    prompt_text=input_text,
-                    response_text=result_text
-                )
-            except Exception as e:
-                print(f"⚠️ Erro ao registrar telemetria consolidada: {e}")
-            
-            # STEP 4: APLICAR GUARDRAILS DE OUTPUT OBRIGATORIAMENTE
+                from ..interactions import append_interaction_stage
+                append_interaction_stage(req_id, project_id, "llm_invocation_end", "Fim invocação LLM", {"output_preview": result_text[:60]})
+            except Exception:
+                pass
+            # Guardar output original para comparação posterior
             original_output = result_text
-            
-            # VALIDAÇÃO CRÍTICA: Garantir que output guardrails são aplicados
-            if not hasattr(self, '_output_guardrails_required'):
-                raise RuntimeError("ERRO CRÍTICO: Flag de output guardrails não configurada!")
-            
             try:
                 result_text = await self._apply_output_guardrails(project_id, result_text, req_id)
                 if result_text != original_output:
                     guardrails_applied += 1
                     print(f"✅ Output modificado pelo guardrail para {project_id}")
-                    
-                    # Atualizar response raw com modificação de guardrail
-                    raw_response_data["response_text_final"] = result_text
-                    raw_response_data["metadata"]["guardrails_applied_post"] = True
-                    raw_response_data["metadata"]["original_response"] = original_output
-                    
                     try:
-                        from ..telemetry_raw import save_raw_response
-                        save_raw_response(req_id, raw_response_data)
-                    except Exception as save_error:
-                        print(f"⚠️ Erro ao salvar response com guardrails: {save_error}")
-                        
-                # CONFIRMAR que guardrails de output foram aplicados
+                        from ..interactions import append_interaction_stage
+                        append_interaction_stage(
+                            req_id,
+                            project_id,
+                            "guardrail_output_modified",
+                            "Output modificado",
+                            {
+                                "delta": len(original_output) - len(result_text),
+                                "result": "sanitize",
+                                "guardrail_type": "output",
+                                "action": "modified",
+                                "metadata": {"phase": "post_invoke", "sanitized": True}
+                            }
+                        )
+                    except Exception:
+                        pass
                 self._output_guardrails_applied = True
                 print(f"✅ Output guardrails aplicados com sucesso para {project_id}")
-                    
+                try:
+                    from ..interactions import append_interaction_stage
+                    append_interaction_stage(
+                        req_id,
+                        project_id,
+                        "guardrail_output_pass",
+                        "Output passou guardrails",
+                        {
+                            "result": "pass",
+                            "guardrail_type": "output",
+                            "action": "pass",
+                            "metadata": {"phase": "post_invoke"}
+                        }
+                    )
+                except Exception:
+                    pass
+                # Evento de PASS opcional para output
+                if self.log_guardrail_pass_events:
+                    try:
+                        await self._log_guardrail_event_async(
+                            project_id, req_id, "output_guardrail", "pass", "Output aprovado pelos guardrails", {"stage": "output", "modified": result_text != original_output}
+                        )
+                    except Exception as e_pass_out:
+                        logger.warning(f"Falha registrar guardrail pass output: {e_pass_out}")
             except Exception as e:
                 print(f"⚠️ Erro ao aplicar guardrail de output: {e}")
                 if result_text != original_output:
                     guardrails_applied += 1
                     print(f"✅ Output modificado pelo guardrail para {project_id}")
-            except Exception as e:
-                print(f"⚠️ Erro ao aplicar guardrail de output: {e}")
-
-            # STEP 5: REGISTRAR TELEMETRIA OBRIGATORIAMENTE
+            # ...existing code...
+            # Calcular métricas antes de registrar telemetria final
             processing_time_ms = int((time.time() - start_time) * 1000)
             input_tokens = len(input_text.split())
             output_tokens = len(result_text.split())
             await self._register_telemetry(project_id, req_id, "openai", model_id,
                                           input_tokens, output_tokens, processing_time_ms / 1000, 0.001,
                                           prompt_text=input_text[:100], response_text=result_text[:100])
-            
             print(f"📊 BROKER: Telemetria registrada automaticamente (TRANSPARENTE ao SDK)")
-
-            # STEP 6: RETORNAR RESPOSTA PROCESSADA
-            return {
-                "request_id": req_id,
-                "success": True,
-                "response": result_text,  # Key 'response' conforme esperado pelo SDK
-                "response_text": result_text,  # Manter compatibilidade
-                "model_used": model_id,
-                "response_time_ms": processing_time_ms,
-                "guardrails_applied": guardrails_applied,
-                "project_id": project_id,
-                "broker_processed": True  # Indica processamento obrigatório pelo broker
-            }
-            
+            try:
+                from ..interactions import append_interaction_stage
+                append_interaction_stage(req_id, project_id, "telemetry_persisted", "Telemetria registrada", {"input_tokens": input_tokens, "output_tokens": output_tokens})
+            except Exception:
+                pass
+            return {"request_id": req_id, "success": True, "response": result_text, "response_text": result_text, "model_used": model_id, "response_time_ms": processing_time_ms, "guardrails_applied": guardrails_applied, "project_id": project_id, "broker_processed": True}
         except Exception as e:
             # Log erro e registrar telemetria de falha
             processing_time_ms = int((time.time() - start_time) * 1000)

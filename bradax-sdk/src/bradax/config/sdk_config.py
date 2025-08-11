@@ -98,7 +98,7 @@ class BradaxSDKConfig:
         return cls(
             broker_url=broker_url,
             timeout=NetworkConstants.HTTP_REQUEST_TIMEOUT,
-            project_id=os.getenv("BRADAX_SDK_PROJECT_ID", "test-integration-project"),
+            project_id=os.getenv("BRADAX_SDK_PROJECT_ID"),
             api_key_prefix=SecurityConstants.API_KEY_PREFIX,
             min_valid_year=ValidationConstants.MIN_VALID_YEAR,
             max_valid_year=ValidationConstants.MAX_VALID_YEAR,

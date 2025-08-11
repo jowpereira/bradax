@@ -29,8 +29,12 @@ class BaseJsonRepository:
         """Garante que o arquivo JSON existe"""
         if not self.file_path.parent.exists():
             raise RuntimeError(f"Diretório de dados não encontrado: {self.file_path.parent}")
+        
+        # Criar arquivo se não existir (com estrutura JSON válida inicial)
         if not self.file_path.exists():
-            raise RuntimeError(f"Arquivo de dados não encontrado: {self.file_path}")
+            with open(self.file_path, 'w', encoding='utf-8') as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            storage_logger.info(f"Arquivo de dados criado: {self.file_path}")
     
     def _read_json(self) -> List[Dict[str, Any]]:
         """Lê dados do arquivo JSON com tratamento de erro"""
@@ -222,8 +226,11 @@ class TelemetryRepository(BaseJsonRepository, ITelemetryRepository):
                 # Garantir timestamp
                 if not telemetry.timestamp:
                     telemetry.timestamp = datetime.now(timezone.utc).isoformat()
-                
-                entries.append(telemetry.__dict__)
+                # Versão compacta para reduzir tamanho em disco
+                if hasattr(telemetry, 'to_compact_dict'):
+                    entries.append(telemetry.to_compact_dict())
+                else:
+                    entries.append(telemetry.__dict__)
                 
                 if self._write_json(entries):
                     return RepositoryResult.success_result(
@@ -357,9 +364,12 @@ class TelemetryRepository(BaseJsonRepository, ITelemetryRepository):
 
 
 class GuardrailRepository(BaseJsonRepository, IGuardrailRepository):
-    """Repository para eventos de guardrails"""
+    """Repository para eventos de guardrails
+
+    IMPORTANTE: usar arquivo dedicado guardrail_events.json (não confundir com guardrails.json de configuração)
+    """
     
-    def __init__(self, file_path: str = "data/guardrails.json"):
+    def __init__(self, file_path: str = "data/guardrail_events.json"):
         super().__init__(file_path)
     
     async def create(self, event: GuardrailEvent) -> RepositoryResult:

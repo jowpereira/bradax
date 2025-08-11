@@ -19,12 +19,19 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass, asdict
 import uuid
 
 from ..logging_config import storage_logger
 from ..utils.paths import get_data_dir
+
+# Evitar import cíclico pesado: apenas para type hints
+if TYPE_CHECKING:
+    try:
+        from ..services.telemetry import TelemetryEvent  # pragma: no cover
+    except Exception:  # pragma: no cover
+        TelemetryEvent = Any  # fallback
 
 # Importação condicional do psutil
 try:
@@ -183,12 +190,18 @@ class ProjectData:
     owner: str = ""
     description: str = ""
     tags: List[str] = None
+    allowed_models: List[str] = None  # Modelos permitidos para o projeto
+    applied_guardrails: List[str] = None  # Guardrails aplicados ao projeto
     
     def __post_init__(self):
         if self.config is None:
             self.config = {}
         if self.tags is None:
             self.tags = []
+        if self.allowed_models is None:
+            self.allowed_models = []
+        if self.applied_guardrails is None:
+            self.applied_guardrails = []
 
 
 @dataclass
@@ -263,9 +276,20 @@ class TelemetryData:
             self.client_ip = self.ip_address
         elif self.client_ip and not self.ip_address:
             self.ip_address = self.client_ip
+
+    def to_compact_dict(self) -> Dict[str, Any]:
+        """Retorna dicionário sem campos vazios para reduzir tamanho em disco."""
+        from dataclasses import asdict
+        data = asdict(self)
+        required = {"telemetry_id", "project_id", "timestamp", "event_type"}
+        compact = {}
+        for k, v in data.items():
+            if k in required or (v not in (None, "", [], {})):
+                compact[k] = v
+        return compact
     
     @classmethod
-    def from_telemetry_event(cls, event: 'TelemetryEvent') -> 'TelemetryData':
+    def from_telemetry_event(cls, event: Any) -> 'TelemetryData':
         """Converte TelemetryEvent para TelemetryData unificado."""
         return cls(
             telemetry_id=event.event_id,
@@ -298,7 +322,6 @@ class TelemetryData:
         )
 
 
-@dataclass
 @dataclass
 class GuardrailEvent:
     """Estrutura de dados de eventos de guardrails"""
@@ -363,16 +386,10 @@ class JsonStorage:
         self._telemetry_cache: List[TelemetryData] = []
         self._guardrails_cache: List[GuardrailEvent] = []
         self._system_info: Optional[SystemInfo] = None
-        
-        # Auto-save periódico
-        self._auto_save_interval = 30  # segundos
-        self._last_save = time.time()
-        self._auto_save_enabled = True
-        
-        # Inicializar
+
+        # Inicializar caches e infos de sistema
         self._load_all_data()
         self._collect_system_info()
-        self._start_auto_save_thread()
     
     def transaction(self):
         """
@@ -656,9 +673,36 @@ class JsonStorage:
         return telemetries[-limit:]
     
     def _save_telemetry(self):
-        """Salva telemetrias em disco"""
-        telemetry_list = [asdict(t) for t in self._telemetry_cache]
-        self._save_json_file(self.telemetry_file, telemetry_list)
+        """Salva telemetrias em disco de forma não destrutiva.
+        - Não sobrescreve arquivo existente com lista vazia.
+        - Faz merge por telemetry_id (ou event_id legado).
+        """
+        try:
+            if not self._telemetry_cache:
+                # Evitar apagar histórico existente
+                if self.telemetry_file.exists() and self.telemetry_file.stat().st_size > 2:
+                    return
+            existing = []
+            if self.telemetry_file.exists():
+                try:
+                    with open(self.telemetry_file, 'r', encoding='utf-8') as f:
+                        existing = json.load(f) or []
+                except Exception:
+                    existing = []
+            index = {}
+            for e in existing:
+                key = e.get('telemetry_id') or e.get('event_id')
+                if key:
+                    index[key] = e
+            for t in self._telemetry_cache:
+                data = asdict(t)
+                key = data.get('telemetry_id') or data.get('event_id')
+                if key:
+                    index[key] = data
+            merged = list(index.values())
+            self._save_json_file(self.telemetry_file, merged)
+        except Exception as e:
+            storage_logger.error(f"Falha ao salvar telemetria (protegido): {e}")
     
     # === OPERAÇÕES DE GUARDRAILS ===
     
@@ -700,9 +744,27 @@ class JsonStorage:
             return []
     
     def _save_guardrails(self):
-        """Salva eventos de guardrails em disco"""
-        events_list = [asdict(e) for e in self._guardrails_cache]
-        self._save_json_file(self.guardrails_file, events_list)
+        """Salva eventos de guardrails em disco sem apagar histórico existente quando cache vazio."""
+        try:
+            if not self._guardrails_cache:
+                if self.guardrails_file.exists() and self.guardrails_file.stat().st_size > 2:
+                    return
+            existing = []
+            if self.guardrails_file.exists():
+                try:
+                    with open(self.guardrails_file, 'r', encoding='utf-8') as f:
+                        existing = json.load(f) or []
+                except Exception:
+                    existing = []
+            index = {e.get('event_id'): e for e in existing if e.get('event_id')}
+            for ev in self._guardrails_cache:
+                data = asdict(ev)
+                if data.get('event_id'):
+                    index[data['event_id']] = data
+            merged = list(index.values())
+            self._save_json_file(self.guardrails_file, merged)
+        except Exception as e:
+            storage_logger.error(f"Falha ao salvar guardrails (protegido): {e}")
     
     # === INFORMAÇÕES DO SISTEMA ===
     
@@ -765,32 +827,7 @@ class JsonStorage:
             "system_info": self._system_info.hostname if self._system_info else None
         }
     
-    def _start_auto_save_thread(self):
-        """Inicia thread de auto-save periódico"""
-        def auto_save_worker():
-            while self._auto_save_enabled:
-                try:
-                    time.sleep(self._auto_save_interval)
-                    self._periodic_save()
-                except Exception as e:
-                    storage_logger.error(
-                        f"Erro no auto-save: {str(e)}"
-                    )
-        
-        auto_save_thread = threading.Thread(target=auto_save_worker, daemon=True)
-        auto_save_thread.start()
-    
-    def _periodic_save(self):
-        """Salva dados periodicamente se houver mudanças"""
-        if time.time() - self._last_save > self._auto_save_interval:
-            with self._lock:
-                self._save_projects()
-                self._save_telemetry()
-                self._save_guardrails()
-                self._last_save = time.time()
-                storage_logger.debug(
-                    f"Auto-save executado: {self._get_timestamp()}"
-                )
+
     
     def force_save_all(self):
         """Força salvamento imediato de todos os dados"""
@@ -798,14 +835,12 @@ class JsonStorage:
             self._save_projects()
             self._save_telemetry()
             self._save_guardrails()
-            self._last_save = time.time()
             storage_logger.info(
                 f"Save forçado executado: {self._get_timestamp()}"
             )
     
     def shutdown(self):
         """Encerra o storage salvando todos os dados"""
-        self._auto_save_enabled = False
         self.force_save_all()
         storage_logger.info("Storage encerrado com dados salvos")
 

@@ -19,13 +19,11 @@ from .telemetry import get_telemetry_collector
 
 logger = logging.getLogger(__name__)
 
-# Import LLM Service para validação inteligente
-try:
-    from .llm.service import LLMService
-    LLM_VALIDATION_AVAILABLE = True
-except ImportError:
-    LLM_VALIDATION_AVAILABLE = False
-    logger.warning("LLM Service não disponível - usando apenas validação por regex/keywords")
+# IMPORT REMOVIDO: O GuardrailEngine não deve depender diretamente de LLMService para evitar
+# dependência circular. Também eliminamos fallback silencioso: se validações avançadas com LLM
+# forem necessárias, elas serão orquestradas pelo LLMService posteriormente. Aqui mantemos apenas
+# motor determinístico (regex/keywords). Qualquer tentativa de adicionar validação 'inteligente'
+# deve ser feita via composição externa, nunca via import opcional silencioso.
 
 
 class GuardrailSeverity(Enum):
@@ -90,7 +88,19 @@ class GuardrailEngine:
     - Cache de regras para performance
     """
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self):
+        # Evitar re-inicialização se já foi inicializado
+        if self._initialized:
+            return
+            
         self.environment = get_hub_environment()
         
         # Usar caminho absoluto FORÇADO para evitar problemas de pasta
@@ -105,36 +115,47 @@ class GuardrailEngine:
                 break
         
         if not project_root:
-            raise RuntimeError("Pasta raiz 'bradax' não encontrada - estrutura de projeto incorreta")
+            from ..exceptions import BradaxConfigurationException
+            raise BradaxConfigurationException(
+                message="Pasta raiz 'bradax' não encontrada - estrutura de projeto incorreta",
+                config_key="project_root",
+                severity=logger.level  # severidade será ajustada pelo handler (placeholder simples)
+            )
         
         from ..utils.paths import get_data_dir
         self.storage_path = get_data_dir()
         self.guardrails_file = self.storage_path / "guardrails.json"
         self.telemetry = get_telemetry_collector()
-        
-        # Inicializar LLM Service para validação inteligente
-        self.llm_service = None
-        if LLM_VALIDATION_AVAILABLE:
-            try:
-                self.llm_service = LLMService()
-                logger.info("LLM Service integrado para validação inteligente de guardrails")
-            except Exception as e:
-                logger.warning(f"Falha ao inicializar LLM Service: {e}")
-        
+
+        # (Fail-fast policy) Nenhum fallback silencioso para ausência de LLM.
+        # GuardrailEngine mantém apenas regras determinísticas.
+        self.llm_service = None  # poderá ser injetado externamente se necessário
+
         # Cache de regras
-        self._rules_cache: Dict[str, GuardrailRule] = {}
+        self._rules_cache = {}
         self._cache_loaded = False
-        
+
         # Verificar se diretório existe
         if not self.storage_path.exists():
-            raise RuntimeError(f"Diretório de dados não encontrado: {self.storage_path}")
-        
+            from ..exceptions import BradaxConfigurationException
+            raise BradaxConfigurationException(
+                message=f"Diretório de dados não encontrado: {self.storage_path}",
+                config_key="data_dir"
+            )
+
         # SEMPRE carregar do arquivo JSON (fonte única de verdade)
         if not self.guardrails_file.exists():
-            raise RuntimeError(f"Arquivo de guardrails obrigatório não encontrado: {self.guardrails_file}")
-        
+            from ..exceptions import BradaxConfigurationException
+            raise BradaxConfigurationException(
+                message=f"Arquivo de guardrails obrigatório não encontrado: {self.guardrails_file}",
+                config_key="guardrails.json"
+            )
+
         self._create_default_rules()  # Na verdade carrega do JSON
         logger.info(f"GuardrailEngine iniciado - ambiente: {self.environment.value}")
+
+        # Marcar como inicializado para evitar re-inicializações
+        self._initialized = True
     
     def _create_default_rules(self) -> None:
         """
@@ -180,14 +201,19 @@ class GuardrailEngine:
                     print(f"   ⏭️ Pulando regra desabilitada: {rule_data.get('rule_id', 'unknown')}")
                     continue
                 
-                # Mapear severidade do JSON para enum
+                # Mapear severidade do JSON para enum (CORRIGIDO para suportar lowercase)
                 severity_map = {
+                    "low": GuardrailSeverity.WARNING,
+                    "medium": GuardrailSeverity.WARNING, 
+                    "high": GuardrailSeverity.BLOCK,
+                    "critical": GuardrailSeverity.CRITICAL,
+                    # Manter compatibilidade com uppercase por segurança
                     "LOW": GuardrailSeverity.WARNING,
                     "MEDIUM": GuardrailSeverity.WARNING, 
                     "HIGH": GuardrailSeverity.BLOCK,
                     "CRITICAL": GuardrailSeverity.CRITICAL
                 }
-                severity = severity_map.get(rule_data.get("severity")) # Coleta a severidade cadastrada na regra
+                severity = severity_map.get(rule_data.get("severity", "medium"), GuardrailSeverity.WARNING)  # CORREÇÃO: Valor padrão
                 
                 # Mapear ação do JSON para enum
                 action_map = {
@@ -233,10 +259,14 @@ class GuardrailEngine:
             self._cache_loaded = True
             
         except Exception as e:
+            from ..exceptions import BradaxConfigurationException
             print(f"❌ ERRO CRÍTICO ao carregar regras de guardrails: {e}")
             print(f"   Tipo: {type(e).__name__}")
             print(f"   Sistema BLOQUEADO - nenhuma regra disponível")
-            raise RuntimeError(f"Sistema de guardrails falhou: {e}")
+            raise BradaxConfigurationException(
+                message=f"Sistema de guardrails falhou: {e}",
+                config_key="guardrails_bootstrap"
+            )
 
     
     def _load_rules(self) -> None:
@@ -258,14 +288,19 @@ class GuardrailEngine:
                 if not rule_data.get("enabled", True):
                     continue  # Pular regras desabilitadas
                 
-                # Mapear severidade do JSON para enum
+                # Mapear severidade do JSON para enum (CORRIGIDO para lowercase)
                 severity_map = {
+                    "low": GuardrailSeverity.WARNING,
+                    "medium": GuardrailSeverity.WARNING, 
+                    "high": GuardrailSeverity.BLOCK,
+                    "critical": GuardrailSeverity.CRITICAL,
+                    # Manter compatibilidade com uppercase por segurança
                     "LOW": GuardrailSeverity.WARNING,
                     "MEDIUM": GuardrailSeverity.WARNING, 
                     "HIGH": GuardrailSeverity.BLOCK,
                     "CRITICAL": GuardrailSeverity.CRITICAL
                 }
-                severity = severity_map.get(rule_data.get("severity", "MEDIUM"), GuardrailSeverity.WARNING)
+                severity = severity_map.get(rule_data.get("severity", "medium"), GuardrailSeverity.WARNING)
                 
                 # Mapear ação do JSON para enum
                 action_map = {
