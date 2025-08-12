@@ -1,0 +1,123 @@
+[
+  {
+    "rule_id": "block_sensitive_words",
+    "name": "Bloqueio de Palavras Sensíveis",
+    "description": "Bloqueia prompts e respostas contendo termos proibidos (ex: senha, cartão, cpf, nudez, violência, racismo, etc)",
+    "type": "pattern_block",
+    "patterns": {
+      "senha": "senha",
+      "cartao": "cartão",
+      "cpf": "cpf",
+      "nudez": "nudez",
+      "violencia": "violência",
+      "racismo": "racismo",
+      "droga": "droga",
+      "terrorismo": "terrorismo",
+      "explosivo": "explosivo",
+      "arma": "arma",
+      "pornografia": "pornografia",
+      "odio": "ódio",
+      "discriminacao": "discriminação"
+    },
+    "keywords": ["senha", "cartão", "cpf", "nudez", "violência", "racismo"],
+    "action": "block",
+    "enabled": true,
+    "severity": "high",
+    "category": "conteúdo_sensível",
+    "examples": ["Qual é sua senha?", "Envie o número do cartão"],
+    "compliance": ["LGPD", "GDPR"],
+    "metadata": {"created_by": "admin", "created_at": "2025-08-10T00:00:00Z"}
+  },
+  {
+    "rule_id": "limit_tokens_per_request",
+    "name": "Limite de Tokens por Requisição",
+    "description": "Bloqueia requisições que excedam o limite de tokens permitido por política.",
+    "type": "token_limit",
+    "max_tokens": 4096,
+    "patterns": {},
+    "keywords": [],
+    "action": "block",
+    "enabled": true,
+    "severity": "medium",
+    "category": "limite_uso",
+    "examples": ["Prompt com 5000 tokens"],
+    "compliance": ["LGPD", "GDPR"],
+    "metadata": {"created_by": "admin", "created_at": "2025-08-10T00:00:00Z"}
+  },
+  {
+    "rule_id": "block_pii_leakage",
+    "name": "Bloqueio de Vazamento de PII",
+    "description": "Detecta e bloqueia respostas que contenham dados pessoais identificáveis (PII), como emails, telefones, RG, etc.",
+    "type": "pattern_block",
+    "patterns": {
+      "cpf": "[0-9]{3}\\.[0-9]{3}\\.[0-9]{3}-[0-9]{2}",
+      "email": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+      "telefone": "\\(\\d{2}\\) \\d{4,5}-\\d{4}"
+    },
+    "keywords": ["cpf", "email", "telefone"],
+    "action": "block",
+    "enabled": true,
+    "severity": "high",
+    "category": "privacidade",
+    "examples": ["Meu CPF é 123.456.789-00", "Email: user@email.com"],
+    "compliance": ["LGPD", "GDPR"],
+    "metadata": {"created_by": "admin", "created_at": "2025-08-10T00:00:00Z"}
+  },
+  {
+    "rule_id": "rate_limit_per_user",
+    "name": "Rate Limit por Usuário",
+    "description": "Limita o número de requisições por usuário por minuto.",
+    "type": "rate_limit",
+    "requests_per_minute": 60,
+    "patterns": {},
+    "keywords": [],
+    "action": "throttle",
+    "enabled": true,
+    "severity": "medium",
+    "category": "limite_uso",
+    "examples": ["Usuário faz 100 requisições em 1 minuto"],
+    "compliance": ["LGPD", "GDPR"],
+    "metadata": {"created_by": "admin", "created_at": "2025-08-10T00:00:00Z"}
+  },
+  {
+    "rule_id": "block_prompt_injection",
+    "name": "Bloqueio de Prompt Injection",
+    "description": "Detecta tentativas de manipulação do prompt para burlar restrições do sistema.",
+    "type": "pattern_block",
+    "patterns": {
+      "ignore_instructions": "ignore previous instructions",
+      "disregard": "disregard all prior",
+      "ai_pretend": "as an ai, pretend",
+      "bypass": "bypass",
+      "jailbreak": "jailbreak",
+      "ignore_guardrails": "ignore guardrails"
+    },
+    "keywords": ["ignore", "bypass", "jailbreak"],
+    "action": "block",
+    "enabled": true,
+    "severity": "high",
+    "category": "segurança",
+    "examples": ["ignore previous instructions", "bypass all filters"],
+    "compliance": ["LGPD", "GDPR"],
+    "metadata": {"created_by": "admin", "created_at": "2025-08-10T00:00:00Z"}
+  },
+  {
+    "rule_id": "block_external_links",
+    "name": "Bloqueio de Links Externos",
+    "description": "Bloqueia respostas que contenham links externos não permitidos.",
+    "type": "pattern_block",
+    "patterns": {
+      "http": "http://",
+      "https": "https://",
+      "www": "www."
+    },
+    "keywords": ["http", "https", "www"],
+    "action": "block",
+    "enabled": false,
+    "severity": "low",
+    "category": "segurança",
+    "examples": ["Acesse http://site.com"],
+    "compliance": ["LGPD", "GDPR"],
+    "metadata": {"created_by": "admin", "created_at": "2025-08-10T00:00:00Z"}
+  }
+]

@@ -97,11 +97,21 @@ class BradaxClient:
         # Configuração: usar fornecida ou global
         self.config = config or get_sdk_config()
         
-        # Project token: usar fornecido ou buscar no ambiente
+        # Project token: usar fornecido ou buscar no ambiente (sem fallback inseguro)
         if not project_token:
-            project_token = os.getenv("BRADAX_PROJECT_TOKEN") or "test-project-token"
-            if not project_token:
-                raise BradaxConfigurationError("Token de projeto é obrigatório (project_token ou BRADAX_PROJECT_TOKEN)")
+            project_token = os.getenv("BRADAX_PROJECT_TOKEN")
+        if not project_token:
+            raise BradaxConfigurationError(
+                "🚨 Segurança: Token de projeto é obrigatório (defina project_token ou variável BRADAX_PROJECT_TOKEN)."
+            )
+        if project_token == "test-project-token":
+            raise BradaxAuthenticationError(
+                "🚨 Segurança: Uso de token placeholder proibido. Forneça token real do projeto.",
+                context={
+                    "project_token": project_token,
+                    "broker_url": broker_url or (self.config.broker_url if hasattr(self, 'config') else 'N/A')
+                }
+            )
         
         # Parâmetros: usar fornecidos ou da configuração
         self.project_token = project_token
@@ -182,7 +192,7 @@ class BradaxClient:
         except httpx.RequestError as e:
             raise BradaxConnectionError(f"Não foi possível conectar ao broker: {str(e)}")
             
-    def invoke_generic(
+    def _invoke_generic(
         self,
         operation: str,
         model_id: str,
@@ -227,7 +237,7 @@ class BradaxClient:
         }
         
         self.logger.info(
-            "Invoke genérico iniciado", 
+            "_invoke_generic interno iniciado", 
             extra_data={"operation": operation, "model": model_id, "request_id": request_id}
         )
         
@@ -263,12 +273,12 @@ class BradaxClient:
             
             if result.get("success"):
                 self.logger.info(
-                    "Invoke genérico concluído", 
+                    "_invoke_generic concluído", 
                     extra_data={"request_id": result.get('request_id')}
                 )
             else:
                 self.logger.warning(
-                    "Invoke genérico falhou", 
+                    "_invoke_generic falhou", 
                     extra_data={"error": result.get('error')}
                 )
             
@@ -276,47 +286,11 @@ class BradaxClient:
             
         except httpx.RequestError as e:
             raise BradaxConnectionError(
-                f"Falha de conexão ao executar invoke genérico: {str(e)}",
+                f"Falha de conexão ao executar _invoke_generic: {str(e)}",
                 broker_url=self.broker_url,
                 timeout=self.timeout
             )
 
-    def generate_text(
-        self, 
-        model: str, 
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        max_tokens: int = 1000,
-        temperature: float = 0.7,
-        stream: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Gera texto usando LLM (wrapper para invoke_generic).
-        
-        Args:
-            model: ID do modelo
-            prompt: Prompt principal
-            system_prompt: Prompt de sistema (opcional)
-            max_tokens: Máximo de tokens
-            temperature: Temperatura
-            stream: Streaming (não implementado ainda)
-            
-        Returns:
-            Resultado da geração
-        """
-        payload = {
-            "prompt": prompt,
-            "system_prompt": system_prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": stream
-        }
-        
-        return self.invoke_generic(
-            operation="chat",
-            model_id=model,
-            payload=payload
-        )
 
     def _extract_project_id(self) -> Optional[str]:
         """
@@ -571,163 +545,13 @@ class BradaxClient:
             
             raise BradaxConnectionError(f"Falha de conexão ao executar invoke: {str(e)}")
     
-    async def ainvoke(
-        self,
-        input_: Union[str, List[Dict[str, str]], Dict[str, Any]],
-        config: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def ainvoke(self, *args, **kwargs):  # type: ignore[override]
+        """Função assíncrona desabilitada.
+        Política atual: apenas invoke síncrono autorizado. Uso futuro planejado.
         """
-        Método ainvoke assíncrono compatível com LangChain para execução de LLMs.
-        
-        Este método segue o padrão LangChain e aceita diferentes tipos de input:
-        - String simples: "Hello, world!"
-        - Lista de mensagens: [{"role": "user", "content": "Hello"}]
-        - Prompt complexo: {"messages": [...], "model": "gpt-4"}
-        
-        Args:
-            input_: Input no formato LangChain (string, messages, prompt)
-            config: Configuração opcional (model, temperature, etc.)
-            **kwargs: Argumentos adicionais (max_tokens, temperature, etc.)
-            
-        Returns:
-            Resultado no formato LangChain com content e metadata
-            
-        Raises:
-            BradaxError: Para qualquer erro de execução
-        """
-        try:
-            # Configuração padrão
-            config = config or {}
-            model = config.get("model") or kwargs.get("model", "gpt-4.1-nano")
-            
-            # Processar diferentes tipos de input para formato de mensagens
-            if isinstance(input_, str):
-                # String simples -> converter para formato de mensagem
-                input_text = input_
-            elif isinstance(input_, list):
-                # Lista de mensagens -> extrair conteúdo
-                input_text = "\n".join([msg.get("content", str(msg)) for msg in input_])
-            elif isinstance(input_, dict) and "messages" in input_:
-                # Prompt complexo -> extrair mensagens
-                messages = input_["messages"]
-                input_text = "\n".join([msg.get("content", str(msg)) for msg in messages])
-                model = input_.get("model", model)
-            else:
-                raise BradaxValidationError(f"Input type não suportado: {type(input_)}")
-            
-            # Preparar payload para o broker - formato LangChain padrão
-            payload = {
-                "operation": kwargs.get("operation", "chat"),
-                "model": kwargs.get("model", model),
-                "payload": {
-                    "messages": [{"role": "user", "content": input_text}],  # Formato LangChain padrão
-                    "temperature": kwargs.get("temperature", 0.7),
-                    "max_tokens": kwargs.get("max_tokens", 1000),
-                    **{k: v for k, v in kwargs.items() if k not in ["operation", "model", "max_tokens", "temperature"]}
-                },
-                "custom_guardrails": self.config.get_custom_guardrails()  # CORREÇÃO: Enviar guardrails para broker
-            }
-            
-            # INTERCEPTAÇÃO TELEMETRIA: Capturar request antes do envio
-            request_data = self.telemetry_interceptor.intercept_request(
-                prompt=input_,
-                model=model,
-                temperature=kwargs.get("temperature", config.get("temperature", 0.7)),
-                max_tokens=kwargs.get("max_tokens", config.get("max_tokens", 1000)),
-                metadata={
-                    "operation": "ainvoke",
-                    "config": config,
-                    "kwargs": kwargs,
-                    "payload": payload,
-                    "is_async": True
-                }
-            )
-            
-            # Executar via broker (usando httpx async com headers de telemetria)
-            project_token = os.getenv('BRADAX_PROJECT_TOKEN', 'default-token')
-            
-            # 🔒 GERAR HEADERS DE TELEMETRIA OBRIGATÓRIOS (HOTFIX)
-            telemetry_headers = self.telemetry_interceptor.get_telemetry_headers()
-            
-            # Combinar headers de config com telemetria
-            headers = self.config.get_headers()
-            headers.update(telemetry_headers)
-            headers.update({
-                "Authorization": f"Bearer {project_token}",
-            })
-            
-            async with httpx.AsyncClient(timeout=30.0) as async_client:
-                response = await async_client.post(
-                    f"{self.broker_url}/api/v1/llm/invoke",
-                    json=payload,
-                    headers=headers
-                )
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                # Verificar se foi sucesso
-                if result.get("success"):
-                    # Formato de resposta compatível com LangChain
-                    langchain_response = {
-                        "content": result.get("response_text", ""),
-                        "response_metadata": {
-                            "model": model,
-                            "usage": result.get("usage", {}),
-                            "finish_reason": result.get("finish_reason"),
-                            "request_id": result.get("request_id")
-                        }
-                    }
-                    
-                    # INTERCEPTAÇÃO TELEMETRIA: Capturar response após sucesso
-                    self.telemetry_interceptor.capture_response(
-                        request_data=request_data,
-                        response_data=langchain_response,
-                        raw_response=result,
-                        success=True
-                    )
-                    
-                    # Retornar formato compatível com LangChain
-                    return langchain_response
-                else:
-                    # Caso de erro do broker
-                    error_msg = result.get("error", "Erro desconhecido")
-                    
-                    # INTERCEPTAÇÃO TELEMETRIA: Capturar erro do broker
-                    self.telemetry_interceptor.capture_response(
-                        request_data=request_data,
-                        response_data=None,
-                        raw_response=result,
-                        success=False,
-                        error_message=error_msg
-                    )
-                    
-                    raise BradaxBrokerError(f"Erro no broker: {error_msg}")
-            else:
-                # INTERCEPTAÇÃO TELEMETRIA: Capturar erro HTTP
-                self.telemetry_interceptor.capture_response(
-                    request_data=request_data,
-                    response_data=None,
-                    raw_response={"status_code": response.status_code, "text": response.text},
-                    success=False,
-                    error_message=f"Erro HTTP: {response.status_code}"
-                )
-                
-                raise BradaxBrokerError(f"Erro HTTP: {response.status_code} - {response.text}")
-                
-        except httpx.RequestError as e:
-            # INTERCEPTAÇÃO TELEMETRIA: Capturar erro de conexão
-            if 'request_data' in locals():
-                self.telemetry_interceptor.capture_response(
-                    request_data=request_data,
-                    response_data=None,
-                    raw_response=None,
-                    success=False,
-                    error_message=f"Conexão falhou: {str(e)}"
-                )
-            
-            raise BradaxConnectionError(f"Falha de conexão ao executar ainvoke: {str(e)}")
+        raise BradaxConfigurationError(
+            "🚨 Segurança: ainvoke() desabilitado nesta versão. Use invoke()."
+        )
     
 
     def check_broker_health(self) -> Dict[str, Any]:

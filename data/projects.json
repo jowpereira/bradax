@@ -1,0 +1,77 @@
+{
+  "proj_real_001": {
+    "project_id": "proj_real_001",
+    "name": "Projeto Real 1",
+    "created_at": "2025-08-10T00:00:00Z",
+    "updated_at": "2025-08-10T00:00:00Z",
+    "status": "active",
+    "config": {},
+    "api_key_hash": "hash_proj1",
+    "owner": "user1@empresa.com",
+    "description": "Projeto de produção para validação real do Bradax.",
+    "tags": [
+      "prod",
+      "validação"
+    ],
+    "allowed_models": [
+      "gpt-4.1-nano"
+    ],
+    "applied_guardrails": [
+      "block_sensitive_words",
+      "limit_tokens_per_request",
+      "block_pii_leakage",
+      "rate_limit_per_user",
+      "block_prompt_injection"
+    ]
+  },
+  "proj_real_002": {
+    "project_id": "proj_real_002",
+    "name": "Projeto Real 2",
+    "created_at": "2025-08-10T00:00:00Z",
+    "updated_at": "2025-08-10T00:00:00Z",
+    "status": "active",
+    "config": {},
+    "api_key_hash": "hash_proj2",
+    "owner": "user2@empresa.com",
+    "description": "Projeto de testes avançados.",
+    "tags": [
+      "test",
+      "avançado"
+    ],
+    "allowed_models": [
+      "gpt-4.1-nano"
+    ],
+    "applied_guardrails": [
+      "block_sensitive_words",
+      "limit_tokens_per_request",
+      "block_pii_leakage",
+      "rate_limit_per_user",
+      "block_prompt_injection"
+    ]
+  },
+  "proj_real_003": {
+    "project_id": "proj_real_003",
+    "name": "Projeto Real 3",
+    "created_at": "2025-08-10T00:00:00Z",
+    "updated_at": "2025-08-10T00:00:00Z",
+    "status": "active",
+    "config": {},
+    "api_key_hash": "hash_proj3",
+    "owner": "user3@empresa.com",
+    "description": "Projeto para simulação de produção.",
+    "tags": [
+      "simulação",
+      "produção"
+    ],
+    "allowed_models": [
+      "gpt-4.1-nano"
+    ],
+    "applied_guardrails": [
+      "block_sensitive_words",
+      "limit_tokens_per_request",
+      "block_pii_leakage",
+      "rate_limit_per_user",
+      "block_prompt_injection"
+    ]
+  }
+}
