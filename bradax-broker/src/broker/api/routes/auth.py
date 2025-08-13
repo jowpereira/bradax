@@ -30,10 +30,10 @@ except ImportError:
         DEFAULT_REQUESTS_PER_MINUTE = 60
         DEFAULT_REQUESTS_PER_HOUR = 1000
         DEFAULT_MAX_CONCURRENT = 5
-        
+
     class LLMConstants:
         DEFAULT_MAX_TOKENS_PER_REQUEST = 8192
-        
+
     class OrganizationConstants:
         ORGANIZATION_NAME = "Bradax AI Solutions"
 
@@ -64,32 +64,32 @@ class TokenResponse(BaseModel):
 async def authenticate(request: TokenRequest) -> TokenResponse:
     """
     Autentica um projeto corporativo e retorna token JWT.
-    
+
     Args:
         request: Dados de autenticação do projeto
-    
+
     Returns:
         Token JWT com informações corporativas
     """
-    
+
     # Autenticar projeto
-    project = await project_auth.authenticate_project(
+    project = await project_auth.authenticate_project_async(
         project_id=request.project_id,
         api_key=request.api_key
     )
-    
+
     # Gerar token de acesso
     access_token = await project_auth.generate_access_token(
         project=project,
         scopes=request.scopes
     )
-    
+
     return TokenResponse(
         access_token=access_token,
         token_type="Bearer",
         expires_in=SecurityConstants.JWT_EXPIRATION_MINUTES * 60,  # Converter para segundos
         project_id=project.project_id,
-        organization=project.organization,
+        organization=project.organization_id,
         scopes=request.scopes or ["llm:read", "llm:write", "vector:read", "vector:write", "graph:execute"]
     )
 
@@ -98,20 +98,20 @@ async def authenticate(request: TokenRequest) -> TokenResponse:
 async def validate_token(token: str = Depends(security)) -> Dict[str, Any]:
     """
     Valida um token JWT e retorna informações do projeto.
-    
+
     Args:
         token: Token JWT para validar
-    
+
     Returns:
         Informações do projeto autenticado
     """
-    
+
     # Extrair token do header Authorization
     token_value = token.credentials
-    
+
     # Validar token
     payload = await project_auth.validate_token(token_value)
-    
+
     return {
         "valid": True,
         "project_id": payload.get("project_id"),
@@ -129,27 +129,27 @@ async def get_project_info(
 ) -> Dict[str, Any]:
     """
     Retorna informações detalhadas do projeto autenticado.
-    
+
     Utiliza constantes centralizadas para limites e configurações.
-    
+
     Args:
         project_id: ID do projeto
         token: Token JWT de autenticação
-    
+
     Returns:
         Informações detalhadas do projeto com configurações baseadas em constantes
     """
-    
+
     # Validar token
     payload = await project_auth.validate_token(token.credentials)
-    
+
     # Verificar se token é do projeto solicitado
     if payload.get("project_id") != project_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Token não autorizado para este projeto"
         )
-    
+
     return {
         "project_id": project_id,
         "organization": payload.get("organization"),

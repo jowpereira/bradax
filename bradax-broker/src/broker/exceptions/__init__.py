@@ -45,21 +45,22 @@ class ErrorCategory(Enum):
 class BradaxException(Exception):
     """
     Exceção base para todas as exceções do Bradax Broker
-    
+
     Fornece estrutura padronizada para tratamento de erros
     com contexto rico e rastreabilidade completa.
     """
-    
+
     def __init__(
         self,
         message: str,
         error_code: str,
         category: ErrorCategory,
         severity: ErrorSeverity = ErrorSeverity.MEDIUM,
-        details: Optional[Dict[str, Any]] = None,
+        base_details: Optional[Dict[str, Any]] = None,
         original_exception: Optional[Exception] = None,
         user_message: Optional[str] = None,
-        resolution_steps: Optional[List[str]] = None
+        resolution_steps: Optional[List[str]] = None,
+        **kwargs
     ):
         self.error_id = str(uuid.uuid4())
         self.timestamp = datetime.utcnow().isoformat()
@@ -67,14 +68,22 @@ class BradaxException(Exception):
         self.error_code = error_code
         self.category = category
         self.severity = severity
-        self.details = details or {}
+        # Compat: permitir ainda receber 'details' via kwargs sem conflitar (evita múltiplos valores)
+        extra_details = kwargs.pop('details', None)
+        merged = {}
+        if isinstance(base_details, dict):
+            merged.update(base_details)
+        if isinstance(extra_details, dict):
+            # campos de extra_details têm precedência
+            merged.update(extra_details)
+        self.details = merged
         self.original_exception = original_exception
         self.user_message = user_message or self._generate_user_message()
         self.resolution_steps = resolution_steps or []
         self.stack_trace = traceback.format_exc() if original_exception else None
-        
+
         super().__init__(self.message)
-    
+
     def _generate_user_message(self) -> str:
         """Gera mensagem amigável para o usuário"""
         category_messages = {
@@ -91,7 +100,7 @@ class BradaxException(Exception):
             ErrorCategory.RATE_LIMIT: "Limite de requisições excedido."
         }
         return category_messages.get(self.category, "Erro interno do sistema.")
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Converte exceção para dicionário estruturado"""
         return {
@@ -106,14 +115,14 @@ class BradaxException(Exception):
             "resolution_steps": self.resolution_steps,
             "stack_trace": self.stack_trace
         }
-    
+
     def __str__(self) -> str:
         return f"[{self.error_code}] {self.category.value.upper()}: {self.message}"
 
 
 class BradaxBusinessException(BradaxException):
     """Exceções relacionadas a regras de negócio"""
-    
+
     def __init__(
         self,
         message: str,
@@ -134,14 +143,14 @@ class BradaxBusinessException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.BUSINESS_RULE,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxValidationException(BradaxException):
     """Exceções relacionadas a validação de dados"""
-    
+
     def __init__(
         self,
         message: str,
@@ -162,14 +171,14 @@ class BradaxValidationException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.VALIDATION,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxAuthenticationException(BradaxException):
     """Exceções relacionadas a autenticação"""
-    
+
     def __init__(
         self,
         message: str,
@@ -178,23 +187,28 @@ class BradaxAuthenticationException(BradaxException):
         **kwargs
     ):
         error_code = f"AUTH_{auth_method.upper()}"
+        # Captura 'details' fornecido pelo chamador (se houver) para mesclar e evitar duplicidade
+        user_details = kwargs.pop("details", None)
         details = {
             "auth_method": auth_method,
             "project_id": project_id
         }
+        if user_details and isinstance(user_details, dict):
+            # Merge (user_details tem precedência em caso de conflito)
+            details.update(user_details)
         super().__init__(
             message=message,
             error_code=error_code,
             category=ErrorCategory.AUTHENTICATION,
             severity=ErrorSeverity.HIGH,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxAuthorizationException(BradaxException):
     """Exceções relacionadas a autorização"""
-    
+
     def __init__(
         self,
         message: str,
@@ -214,14 +228,14 @@ class BradaxAuthorizationException(BradaxException):
             error_code=error_code,
             category=ErrorCategory.AUTHORIZATION,
             severity=ErrorSeverity.HIGH,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxTechnicalException(BradaxException):
     """Exceções relacionadas a problemas técnicos"""
-    
+
     def __init__(
         self,
         message: str,
@@ -238,14 +252,14 @@ class BradaxTechnicalException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.TECHNICAL,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxExternalAPIException(BradaxException):
     """Exceções relacionadas a APIs externas"""
-    
+
     def __init__(
         self,
         message: str,
@@ -266,14 +280,14 @@ class BradaxExternalAPIException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.EXTERNAL_API,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxConfigurationException(BradaxException):
     """Exceções relacionadas a configuração"""
-    
+
     def __init__(
         self,
         message: str,
@@ -295,7 +309,7 @@ class BradaxConfigurationException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.CONFIGURATION,
-            details=details,
+            base_details=details,
             resolution_steps=resolution_steps,
             **kwargs
         )
@@ -303,7 +317,7 @@ class BradaxConfigurationException(BradaxException):
 
 class BradaxDataAccessException(BradaxException):
     """Exceções relacionadas a acesso de dados"""
-    
+
     def __init__(
         self,
         message: str,
@@ -322,14 +336,14 @@ class BradaxDataAccessException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.DATA_ACCESS,
-            details=details,
+            base_details=details,
             **kwargs
         )
 
 
 class BradaxNetworkException(BradaxException):
     """Exceções relacionadas a problemas de rede"""
-    
+
     def __init__(
         self,
         message: str,
@@ -354,7 +368,7 @@ class BradaxNetworkException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.NETWORK,
-            details=details,
+            base_details=details,
             resolution_steps=resolution_steps,
             **kwargs
         )
@@ -362,7 +376,7 @@ class BradaxNetworkException(BradaxException):
 
 class BradaxTimeoutException(BradaxException):
     """Exceções relacionadas a timeout"""
-    
+
     def __init__(
         self,
         message: str,
@@ -386,7 +400,7 @@ class BradaxTimeoutException(BradaxException):
             message=message,
             error_code=error_code,
             category=ErrorCategory.TIMEOUT,
-            details=details,
+            base_details=details,
             resolution_steps=resolution_steps,
             **kwargs
         )
@@ -394,7 +408,7 @@ class BradaxTimeoutException(BradaxException):
 
 class BradaxRateLimitException(BradaxException):
     """Exceções relacionadas a limite de taxa"""
-    
+
     def __init__(
         self,
         message: str,
@@ -421,7 +435,7 @@ class BradaxRateLimitException(BradaxException):
             error_code=error_code,
             category=ErrorCategory.RATE_LIMIT,
             severity=ErrorSeverity.LOW,
-            details=details,
+            base_details=details,
             resolution_steps=resolution_steps,
             **kwargs
         )
@@ -526,10 +540,10 @@ __all__ = [
     'BradaxException',
     'ErrorSeverity',
     'ErrorCategory',
-    
+
     # Exceções específicas
     'BradaxBusinessException',
-    'BradaxValidationException', 
+    'BradaxValidationException',
     'BradaxAuthenticationException',
     'BradaxAuthorizationException',
     'BradaxTechnicalException',
@@ -539,7 +553,7 @@ __all__ = [
     'BradaxNetworkException',
     'BradaxTimeoutException',
     'BradaxRateLimitException',
-    
+
     # Aliases para compatibilidade
     'AuthenticationException',
     'AuthorizationException',
@@ -553,7 +567,7 @@ __all__ = [
     'NetworkException',
     'TimeoutException',
     'RateLimitException',
-    
+
     # Funções utilitárias
     'create_authentication_error',
     'create_authorization_error',
