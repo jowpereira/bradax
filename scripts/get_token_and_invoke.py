@@ -55,11 +55,16 @@ def broker_url() -> str:
 
 
 def is_broker_up(url: str) -> bool:
-    try:
-        r = requests.get(f"{url}/health", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
+    """Considera saudável se qualquer endpoint de health conhecido responder 200."""
+    paths = ["/health", "/health/health"]
+    for p in paths:
+        try:
+            r = requests.get(f"{url}{p}", timeout=3)
+            if r.status_code == 200:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def load_project(project_id: Optional[str]) -> Tuple[str, dict]:
@@ -167,7 +172,15 @@ def main():
     print(f"[API_KEY] {api_key}")
 
     token = obtain_token(url, project_id, api_key)
-    print(f"[TOKEN] obtido (len={len(token)})")
+    # Extrai kid do header para confirmar multi-auth derivado
+    try:
+        header_b64 = token.split('.')[0]
+        import base64, json
+        header_json = json.loads(base64.urlsafe_b64decode(header_b64 + '=='))
+        kid = header_json.get('kid')
+    except Exception:  # pragma: no cover
+        kid = None
+    print(f"[TOKEN] obtido (len={len(token)}) kid={kid}")
 
     if args.write_token and not args.print_only:
         write_token(token)

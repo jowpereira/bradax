@@ -17,16 +17,17 @@ def main():
     # Carregar variáveis de ambiente
     env_file = Path(__file__).parent / ".env"
     load_dotenv(dotenv_path=env_file)
-    
-    print("🚀 Iniciando Bradax Broker...")
-    print(f"📁 Diretório de trabalho: {Path.cwd()}")
-    print(f"🔑 JWT_SECRET definido: {'***' if os.getenv('JWT_SECRET') else 'NÃO'}")
-    print(f"🤖 OpenAI configurado: {'✅' if os.getenv('OPENAI_API_KEY', '').startswith('sk-') else '❌'}")
-    
+
+    # Removido emoji para evitar UnicodeEncodeError em consoles Windows cp1252
+    print("Iniciando Bradax Broker...")
+    print(f"Diretorio de trabalho: {Path.cwd()}")
+    print(f"JWT_SECRET definido: {'SIM' if os.getenv('JWT_SECRET') else 'NAO'}")
+    print(f"OpenAI configurado: {'SIM' if os.getenv('OPENAI_API_KEY', '').startswith('sk-') else 'NAO'}")
+
     # Importar e iniciar aplicação
     try:
         from broker.main import app
-        
+
         # Configuração do servidor
         config = {
             "app": app,
@@ -35,10 +36,10 @@ def main():
             "reload": False,  # Desabilitado para evitar conflitos em produção
             "log_level": "info"
         }
-        
-        print(f"🌐 Iniciando servidor em http://{config['host']}:{config['port']}")
+
+        print(f"Iniciando servidor em http://{config['host']}:{config['port']}")
         uvicorn.run(**config)
-        
+
     except ImportError as e:
         print(f"❌ Erro ao importar aplicação: {e}")
         sys.exit(1)

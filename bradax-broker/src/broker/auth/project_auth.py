@@ -9,7 +9,9 @@ Sistema de autenticação empresarial sem hardcode/fallbacks.
 
 import logging
 import os
+import hmac
 import hashlib
+import base64
 import secrets
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta, timezone
@@ -18,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..constants import HubSecurityConstants, get_hub_environment, BradaxEnvironment
 from ..exceptions import (
-    AuthenticationException,
+    AuthenticationException,  # alias para BradaxAuthenticationException
     AuthorizationException,
     ValidationException,
     ConfigurationException
@@ -249,9 +251,12 @@ class ProjectAuth:
     # JWT Access Tokens
     # ----------------------------------------------------------------------------------
     async def generate_access_token(self, project: ProjectSession, scopes: Optional[List[str]] = None) -> str:
-        """Gera JWT corporativo para o projeto."""
+        """Gera JWT corporativo derivando segredo por projeto (SEM FALLBACK)."""
         if not HubSecurityConstants.JWT_SECRET_KEY:
-            raise ConfigurationException("JWT_SECRET_KEY não configurado")
+            raise ConfigurationException(
+                "JWT_SECRET_KEY não configurado",
+                config_key="BRADAX_JWT_SECRET"
+            )
 
         now = datetime.now(timezone.utc)
         exp = now + timedelta(minutes=HubSecurityConstants.JWT_EXPIRATION_MINUTES)
@@ -264,25 +269,155 @@ class ProjectAuth:
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),
         }
-        token = jwt.encode(payload, HubSecurityConstants.JWT_SECRET_KEY, algorithm=HubSecurityConstants.JWT_ALGORITHM)
+        # Deriva segredo específico do projeto (versão v1)
+        derived_secret, kid = self._derive_project_secret(project.project_id, version="v1")
+        headers = {"kid": kid}
+        try:
+            token = jwt.encode(
+                payload,
+                derived_secret,
+                algorithm=HubSecurityConstants.JWT_ALGORITHM,
+                headers=headers
+            )
+        except Exception as e:
+            raise AuthenticationException(
+                "Falha ao gerar token JWT",
+                auth_method="jwt_issue",
+                project_id=project.project_id,
+                details={"error": str(e)}
+            )
+        logger.info(
+            "jwt_issue",
+            extra={
+                "event": "jwt_issue",
+                "project_id": project.project_id,
+                "kid": kid,
+                "signing_strategy": "derived_v1",
+                "scopes_count": len(payload.get("scopes", []))
+            }
+        )
         return token
 
     async def validate_token(self, token: str) -> Dict[str, Any]:
-        """Valida e decodifica JWT retornando payload."""
+        """Valida JWT derivado por projeto (sem fallback)."""
         if not HubSecurityConstants.JWT_SECRET_KEY:
-            raise ConfigurationException("JWT_SECRET_KEY não configurado")
+            raise ConfigurationException(
+                "JWT_SECRET_KEY não configurado",
+                config_key="BRADAX_JWT_SECRET"
+            )
+        if not token or not isinstance(token, str):
+            raise ValidationException(
+                "Token JWT inválido (tipo ou vazio)",
+                field_name="jwt_token",
+                invalid_value=token,
+                validation_rule="required_non_empty_string"
+            )
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+        except Exception as e:
+            raise AuthenticationException(
+                "Header JWT inválido",
+                auth_method="jwt_header",
+                details={"error": str(e)}
+            )
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise AuthenticationException(
+                "kid ausente no header JWT",
+                auth_method="jwt_header",
+                details={"header_keys": list(unverified_header.keys())}
+            )
+        # Formato esperado: p:<project_id>:v1
+        if not kid.startswith("p:") or kid.count(":") != 2:
+            raise AuthenticationException(
+                "Formato de kid inválido",
+                auth_method="jwt_header",
+                details={"kid": kid, "expected_pattern": "p:<project_id>:v1"}
+            )
+        _, project_id, version = kid.split(":", 2)
+        if version != "v1":
+            raise AuthenticationException(
+                "Versão de token não suportada",
+                auth_method="jwt_header",
+                project_id=project_id,
+                details={"version": version}
+            )
+        derived_secret, _ = self._derive_project_secret(project_id, version=version)
         try:
             payload = jwt.decode(
                 token,
-                HubSecurityConstants.JWT_SECRET_KEY,
+                derived_secret,
                 algorithms=[HubSecurityConstants.JWT_ALGORITHM],
-                options={"require": ["exp", "sub"], "verify_exp": True},
+                options={"require": ["exp", "sub", "project_id"], "verify_exp": True},
             )
-            return payload
         except jwt.ExpiredSignatureError as e:
-            raise AuthenticationException("Token expirado", details={"error": str(e)})
+            raise AuthenticationException(
+                "Token expirado",
+                auth_method="jwt_validation",
+                project_id=project_id,
+                details={"error": str(e)}
+            )
         except jwt.InvalidTokenError as e:
-            raise AuthenticationException("Token inválido", details={"error": str(e)})
+            raise AuthenticationException(
+                "Token inválido",
+                auth_method="jwt_validation",
+                project_id=project_id,
+                details={"error": str(e)}
+            )
+        # Consistência payload vs header
+        if payload.get("project_id") != project_id:
+            raise AuthenticationException(
+                "project_id do payload diverge do header",
+                auth_method="jwt_validation",
+                project_id=project_id,
+                details={"payload_project_id": payload.get("project_id")}
+            )
+        # Verifica se projeto existe e está ativo
+        try:
+            self.storage.get_project(project_id)
+        except ValidationException as e:
+            raise AuthenticationException(
+                "Projeto inexistente ou inativo para token",
+                auth_method="jwt_validation",
+                project_id=project_id,
+                details=e.details
+            )
+        logger.info(
+            "jwt_validate",
+            extra={
+                "event": "jwt_validate",
+                "project_id": project_id,
+                "kid": kid,
+                "signing_strategy": "derived_v1"
+            }
+        )
+        return payload
+
+    # ------------------------------------------------------------------
+    # Segredo derivado por projeto (v1)
+    # ------------------------------------------------------------------
+    def _derive_project_secret(self, project_id: str, version: str = "v1") -> Tuple[str, str]:
+        """Deriva segredo específico do projeto usando HMAC(master, namespace+project_id)."""
+        if not project_id or len(project_id) < 3:
+            raise ValidationException(
+                "project_id inválido para derivação",
+                field_name="project_id",
+                invalid_value=project_id,
+                validation_rule="min_length_3"
+            )
+        if not HubSecurityConstants.JWT_SECRET_KEY:
+            raise ConfigurationException(
+                "JWT_SECRET_KEY não configurado",
+                config_key="BRADAX_JWT_SECRET"
+            )
+        namespace = f"bradax-jwt-{version}::".encode()
+        key_bytes = HubSecurityConstants.JWT_SECRET_KEY.encode()
+        msg = namespace + project_id.lower().encode()
+        digest = hmac.new(key_bytes, msg, hashlib.sha256).digest()
+        # urlsafe base64 sem padding para reduzir tamanho
+        b64 = base64.urlsafe_b64encode(digest).decode().rstrip('=')
+        kid = f"p:{project_id}:" + version
+        return b64, kid
 
     def _parse_api_key(self, api_key: str, expected_project_id: Optional[str] = None) -> Dict[str, Any]:
         """

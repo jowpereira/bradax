@@ -32,12 +32,12 @@ from ...exceptions import (
 
 class LLMProvider(ABC):
     """Interface base para providers de LLM"""
-    
+
     @abstractmethod
     def invoke(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """Invoca o modelo LLM com as mensagens fornecidas"""
         pass
-    
+
     @abstractmethod
     def is_available(self) -> bool:
         """Verifica se o provider está disponível"""
@@ -47,11 +47,11 @@ class LLMProvider(ABC):
 class OpenAIProvider(LLMProvider):
     """
     Provider OpenAI usando LangChain
-    
+
     Implementação robusta com tratamento de erros usando o sistema
     de exceções Bradax. Sem fallbacks ou simulações.
     """
-    
+
     def __init__(self):
         """Inicializa o provider OpenAI"""
         if not LANGCHAIN_AVAILABLE:
@@ -60,21 +60,14 @@ class OpenAIProvider(LLMProvider):
                 config_key="langchain_dependency",
                 severity=ErrorSeverity.CRITICAL
             )
-        
-        # Buscar chave API usando múltiplas possibilidades
-        self.api_key = (
-            os.getenv("OPENAI_API_KEY") or 
-            os.getenv("BRADAX_BROKER_OPENAI_API_KEY") or
-            os.getenv("OPENAI_KEY")
-        )
-        
+        # Buscar chave API (única variável suportada)
+        self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise BradaxConfigurationException(
-                message="Chave API OpenAI não configurada. Configure OPENAI_API_KEY ou BRADAX_BROKER_OPENAI_API_KEY",
+                message="Chave API OpenAI não configurada. Defina OPENAI_API_KEY",
                 config_key="OPENAI_API_KEY",
                 severity=ErrorSeverity.CRITICAL
             )
-        
         try:
             self.client = ChatOpenAI(
                 api_key=self.api_key,
@@ -90,18 +83,18 @@ class OpenAIProvider(LLMProvider):
                 operation="initialization",
                 severity=ErrorSeverity.CRITICAL
             )
-    
+
     def invoke(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """
         Invoca o modelo OpenAI via LangChain
-        
+
         Args:
             messages: Lista de mensagens no formato [{"role": "user", "content": "texto"}]
             **kwargs: Parâmetros adicionais para o modelo
-        
+
         Returns:
             str: Resposta do modelo
-            
+
         Raises:
             BradaxExternalAPIException: Erros da API OpenAI
             BradaxTechnicalException: Erros técnicos internos
@@ -113,14 +106,14 @@ class OpenAIProvider(LLMProvider):
                 operation="invoke",
                 severity=ErrorSeverity.HIGH
             )
-        
+
         try:
             # Converte mensagens para formato LangChain
             langchain_messages = []
             for msg in messages:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
-                
+
                 if role == "system":
                     langchain_messages.append(SystemMessage(content=content))
                 elif role in ["user", "human"]:
@@ -128,20 +121,20 @@ class OpenAIProvider(LLMProvider):
                 else:
                     # Trata roles desconhecidos como user
                     langchain_messages.append(HumanMessage(content=content))
-            
+
             # Executa a invocação
             response = self.client.invoke(langchain_messages)
-            
+
             # Extrai o conteúdo da resposta
             if hasattr(response, 'content'):
                 return response.content
             else:
                 return str(response)
-                
+
         except Exception as e:
             # Determina se é erro da API ou erro técnico
             error_message = str(e).lower()
-            
+
             if any(keyword in error_message for keyword in [
                 "api", "rate limit", "quota", "authentication", "invalid_api_key",
                 "insufficient_quota", "model_not_found"
@@ -161,13 +154,13 @@ class OpenAIProvider(LLMProvider):
                     operation="invoke",
                     severity=ErrorSeverity.HIGH
                 )
-    
+
     def is_available(self) -> bool:
         """Verifica se o provider está disponível"""
         return (
-            LANGCHAIN_AVAILABLE and 
-            self.api_key is not None and 
-            hasattr(self, 'client') and 
+            LANGCHAIN_AVAILABLE and
+            self.api_key is not None and
+            hasattr(self, 'client') and
             self.client is not None
         )
 
@@ -178,15 +171,11 @@ available_providers = {}
 def get_available_providers() -> Dict[str, LLMProvider]:
     """Retorna os providers disponíveis"""
     global available_providers
-    
+
     if not available_providers:
         # Registra apenas providers que estão efetivamente disponíveis
-        openai_key = (
-            os.getenv("OPENAI_API_KEY") or 
-            os.getenv("BRADAX_BROKER_OPENAI_API_KEY") or
-            os.getenv("OPENAI_KEY")
-        )
-        
+        openai_key = os.getenv("OPENAI_API_KEY")
+
         if LANGCHAIN_AVAILABLE and openai_key:
             try:
                 openai_provider = OpenAIProvider()
@@ -195,25 +184,25 @@ def get_available_providers() -> Dict[str, LLMProvider]:
             except Exception:
                 # Se falhou ao inicializar, não adiciona à lista
                 pass
-    
+
     return available_providers
 
 
 def get_provider(provider_name: str) -> LLMProvider:
     """
     Obtém um provider específico
-    
+
     Args:
         provider_name: Nome do provider
-        
+
     Returns:
         LLMProvider: Instância do provider
-        
+
     Raises:
         BradaxConfigurationException: Provider não disponível
     """
     providers = get_available_providers()
-    
+
     if provider_name not in providers:
         available_names = list(providers.keys())
         raise BradaxConfigurationException(
@@ -221,5 +210,5 @@ def get_provider(provider_name: str) -> LLMProvider:
             config_key="llm_provider",
             severity=ErrorSeverity.HIGH
         )
-    
+
     return providers[provider_name]

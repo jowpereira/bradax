@@ -80,6 +80,10 @@ Formato: `bradax_<project_id>_<org>_<stored_hash + randomSuffix>_<timestamp>`
 
 Sem substrings parciais, sem tolerância. Se o hash não for o prefixo imediato do penúltimo componente, a autenticação falha.
 
+### (Novo) Multi-Auth JWT por Projeto (v1)
+
+Agora cada token é assinado com segredo derivado do `project_id` (HMAC-SHA256) e inclui `kid` no header (`p:<project_id>:v1`). Tokens antigos antes de 2025-08-19 devem ser regenerados. Scripts já exibem o `kid` obtido.
+
 ## 6. Usar o SDK para Invocar
 
 Se gravou o token no `.env`, basta:
